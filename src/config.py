@@ -75,7 +75,7 @@ class Settings(BaseSettings):
 
     # Browser settings
     browser_headless: bool = Field(
-        default=False,  # Set to False for debugging/testing
+        default=True,  # Set to True for production (headless). Use --headed flag or APP_BROWSER_HEADLESS=false for debugging
         description="Run browser in headless mode"
     )
     browser_timeout: int = Field(

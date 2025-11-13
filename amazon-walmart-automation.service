@@ -1,0 +1,28 @@
+[Unit]
+Description=Amazon to Walmart Shopping List Automation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# IMPORTANT: Replace USER with your actual username and adjust paths
+User=USER
+WorkingDirectory=/home/USER/VS-Alexa-Walmart
+Environment="PATH=/home/USER/VS-Alexa-Walmart/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/USER/VS-Alexa-Walmart/venv/bin/python src/main.py
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amazon-walmart-automation
+
+# Security settings (optional but recommended)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
