@@ -154,11 +154,10 @@ class AmazonListScraper:
                     except Exception:
                         continue
 
-                # If we get here and still have no items, log a warning
-                logger.warning("Could not determine if list is empty or failed to scrape")
-
-                # Save screenshot for debugging
-                self._save_screenshot("amazon_list_scrape")
+                # If we get here and still have no items, assume list is empty
+                # (avoiding unnecessary screenshots during routine checks)
+                logger.info("No items found in shopping list, assuming empty")
+                return []
 
             logger.success(f"Scraped {len(items)} items from Amazon shopping list")
             return items

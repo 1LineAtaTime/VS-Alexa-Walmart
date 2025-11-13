@@ -5,6 +5,7 @@ import sys
 import time
 import signal
 import argparse
+import random
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -49,6 +50,9 @@ class AmazonWalmartAutomation:
 
         self.should_stop = False
 
+        # Track whether we've done initial Walmart authentication
+        self.walmart_initially_authenticated = False
+
         # Store headless preference (None = use config, True/False = override)
         self.headless = headless if headless is not None else settings.browser_headless
 
@@ -78,32 +82,43 @@ class AmazonWalmartAutomation:
             if not self.browser:
                 self._init_browser()
 
-            # Authenticate with both platforms if not already done
+            # Authenticate with Amazon if not already done
             if not self.amazon_page:
                 logger.info("\n" + "="*70)
                 logger.info("STEP 1: AMAZON AUTHENTICATION")
                 logger.info("="*70)
                 self.amazon_page = self._authenticate_amazon()
 
-            # Check if we should skip Walmart
-            skip_walmart = os.getenv("SKIP_WALMART", "false").lower() == "true"
-
-            if not skip_walmart and not self.walmart_page:
-                logger.info("\n" + "="*70)
-                logger.info("STEP 2: WALMART AUTHENTICATION")
-                logger.info("="*70)
-                self.walmart_page = self._authenticate_walmart()
-
-            # Scrape Amazon shopping list
+            # Scrape Amazon shopping list FIRST (before opening Walmart)
             logger.info("\n" + "="*70)
-            logger.info("STEP 3: SCRAPING AMAZON SHOPPING LIST")
+            logger.info("STEP 2: SCRAPING AMAZON SHOPPING LIST")
             logger.info("="*70)
             amazon_scraper = AmazonListScraper(self.amazon_page)
             items = amazon_scraper.scrape_list()
 
             if not items:
                 logger.info("No items in Amazon shopping list.")
-                logger.info("Keeping browser open, will check again in 5 minutes...")
+
+                # On first run, authenticate with Walmart to verify it works
+                if not self.walmart_initially_authenticated:
+                    logger.info("\n" + "="*70)
+                    logger.info("INITIAL WALMART AUTHENTICATION (First Run)")
+                    logger.info("="*70)
+                    logger.info("Authenticating with Walmart to verify credentials...")
+                    self.walmart_page = self._authenticate_walmart()
+                    self.walmart_initially_authenticated = True
+                    logger.success("Walmart authentication verified successfully")
+
+                    # Close Walmart page immediately since we don't need it yet
+                    logger.info("Closing Walmart page (will reopen when items are found)...")
+                    self._close_walmart()
+                else:
+                    # Close Walmart page to save resources (will reopen when items are found)
+                    if self.walmart_page:
+                        logger.info("Closing Walmart page to save resources...")
+                        self._close_walmart()
+
+                logger.info(f"Keeping Amazon browser open, will check again in {settings.schedule_interval_min_minutes}-{settings.schedule_interval_max_minutes} minutes...")
                 return True
 
             logger.success(f"Found {len(items)} items in Amazon shopping list:")
@@ -112,14 +127,14 @@ class AmazonWalmartAutomation:
 
             # Save items to .txt file
             logger.info("\n" + "="*70)
-            logger.info("STEP 4: SAVING ITEMS TO FILE")
+            logger.info("STEP 3: SAVING ITEMS TO FILE")
             logger.info("="*70)
             txt_file = self._save_items_to_file(items)
             logger.success(f"Items saved to: {txt_file}")
 
             # Clear Amazon shopping list immediately
             logger.info("\n" + "="*70)
-            logger.info("STEP 5: CLEARING AMAZON SHOPPING LIST")
+            logger.info("STEP 4: CLEARING AMAZON SHOPPING LIST")
             logger.info("="*70)
             amazon_clearer = AmazonListClearer(self.amazon_page)
             if amazon_clearer.clear_list():
@@ -128,6 +143,8 @@ class AmazonWalmartAutomation:
                 logger.warning("Failed to fully clear Amazon shopping list")
 
             # Check if we should skip Walmart and stop here
+            skip_walmart = os.getenv("SKIP_WALMART", "false").lower() == "true"
+
             if skip_walmart:
                 logger.info("\n" + "="*70)
                 logger.info("SKIPPING WALMART (SKIP_WALMART=true)")
@@ -152,8 +169,17 @@ class AmazonWalmartAutomation:
 
             # Process each item from the saved file
             logger.info("\n" + "="*70)
-            logger.info("STEP 6: FINDING AND ADDING ITEMS TO WALMART CART")
+            logger.info("STEP 5: WALMART AUTHENTICATION & ADDING ITEMS TO CART")
             logger.info("="*70)
+
+            # Authenticate with Walmart now that we have items to process
+            if not self.walmart_page:
+                logger.info("Authenticating with Walmart...")
+                self.walmart_page = self._authenticate_walmart()
+                self.walmart_initially_authenticated = True
+                logger.success("Walmart authentication successful")
+            else:
+                logger.info("Using existing Walmart session...")
 
             walmart_search = WalmartProductSearch(self.walmart_page)
             walmart_cart = WalmartCartManager(self.walmart_page)
@@ -376,6 +402,11 @@ class AmazonWalmartAutomation:
                     # No items added - keep the file as is
                     logger.info(f"No items added to cart. Keeping shopping list file: {txt_file}")
 
+            # Close Walmart page to save resources until next items are found
+            logger.info("\nClosing Walmart page to save resources...")
+            self._close_walmart()
+            logger.info("Walmart page closed. Will reopen when new items are found.")
+
             return True
 
         except Exception as e:
@@ -383,30 +414,36 @@ class AmazonWalmartAutomation:
             return False
 
     def run_scheduled(self) -> None:
-        """Run automation on a schedule (every N minutes) with persistent browser."""
-        logger.info(f"Starting scheduled automation (every {settings.schedule_interval_minutes} minutes)")
+        """Run automation on a schedule (random interval) with persistent browser."""
+        logger.info(f"Starting scheduled automation (random interval: {settings.schedule_interval_min_minutes}-{settings.schedule_interval_max_minutes} minutes)")
         logger.info("Browsers will stay open between runs to save resources")
         logger.info("Press Ctrl+C to stop")
 
         # Initialize browser once
         self._init_browser()
 
-        # Authenticate once
-        logger.info("Initial authentication...")
+        # Authenticate with Amazon only (Walmart will open on-demand when items are found)
+        logger.info("Initial Amazon authentication...")
         self.amazon_page = self._authenticate_amazon()
-        self.walmart_page = self._authenticate_walmart()
-        logger.success("Authentication complete, browsers will remain open")
+        logger.success("Amazon authentication complete")
+        logger.info("Walmart will authenticate only when items are found in the shopping list")
 
         while not self.should_stop:
             try:
                 # Run automation (browsers stay open)
                 self.run_once()
 
-                # Wait for next run
+                # Wait for next run with random interval
                 if not self.should_stop:
-                    wait_seconds = settings.schedule_interval_minutes * 60
+                    # Generate random wait time between min and max
+                    wait_minutes = random.randint(
+                        settings.schedule_interval_min_minutes,
+                        settings.schedule_interval_max_minutes
+                    )
+                    wait_seconds = wait_minutes * 60
+
                     logger.info(f"\nBrowsers staying open...")
-                    logger.info(f"Waiting {settings.schedule_interval_minutes} minutes until next run...")
+                    logger.info(f"Waiting {wait_minutes} minutes until next run (random interval: {settings.schedule_interval_min_minutes}-{settings.schedule_interval_max_minutes} min)...")
                     logger.info(f"Next run at: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + wait_seconds))}\n")
 
                     # Sleep in small increments to allow for interruption
@@ -476,6 +513,18 @@ class AmazonWalmartAutomation:
         page = self.walmart_auth.authenticate()
         logger.success("Walmart authentication successful")
         return page
+
+    def _close_walmart(self) -> None:
+        """Close Walmart page and context to save resources."""
+        try:
+            if self.walmart_auth:
+                self.walmart_auth.close()
+                self.walmart_auth = None
+
+            self.walmart_page = None
+            logger.info("Walmart page closed successfully")
+        except Exception as e:
+            logger.warning(f"Error closing Walmart page: {e}")
 
     def _remove_items_from_file(self, file_path: str, items_to_remove: list) -> None:
         """Remove successfully added items from the shopping list file.
@@ -577,7 +626,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python src/main.py                    # Run on schedule (every 5 minutes)
+  python src/main.py                    # Run on schedule (random 3-5 min intervals)
   python src/main.py --once             # Run once and exit
   python src/main.py --once --headed    # Run once with visible browser
         """

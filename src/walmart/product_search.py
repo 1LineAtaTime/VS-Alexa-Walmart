@@ -112,9 +112,6 @@ class WalmartProductSearch:
             # Scroll to load more results
             self._scroll_to_load_results()
 
-            # Save screenshot for debugging
-            self._save_screenshot("walmart_search_loaded")
-
             # Find all product cards first (div[@role='group'] containers)
             # This ensures we get products in visual order
             all_product_cards = self.page.locator("div[role='group']").all()

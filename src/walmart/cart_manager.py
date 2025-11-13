@@ -137,23 +137,37 @@ class WalmartCartManager:
                 add_button.click()
                 logger.info("Clicked Add button on search results")
 
-                # Wait for button to change (it should change from "Add" to "1" or similar)
+                # Wait for cart to update and verify success
                 time.sleep(2)
 
-                # Check if button text changed to confirm addition
+                # Verify addition by checking for quantity-in-cart button
+                try:
+                    # Check if a quantity button appeared (indicates item is in cart)
+                    quantity_button = product_element.locator('button[data-testid="quantity-in-cart"]').first
+                    if quantity_button.is_visible(timeout=2000):
+                        quantity_text = quantity_button.inner_text(timeout=1000).strip()
+                        logger.success(f"Item {item_id} added to cart - quantity button shows: '{quantity_text}'")
+                        return True
+                except Exception:
+                    pass
+
+                # Fallback: Check if button text changed
                 try:
                     button_text_after = add_button.inner_text(timeout=1000)
                     logger.info(f"Button text after click: '{button_text_after}'")
 
-                    if button_text_after != button_text_before:
+                    if button_text_after != button_text_before and button_text_after.strip() in ["1", "2", "3", "4", "5"]:
+                        logger.success(f"Item {item_id} added to cart (button changed to '{button_text_after}')")
+                        return True
+                    elif button_text_after != button_text_before:
                         logger.success(f"Item {item_id} added to cart (button changed from '{button_text_before}' to '{button_text_after}')")
                         return True
-                    else:
-                        logger.warning("Button text didn't change, but assuming item was added")
-                        return True
-                except:
-                    logger.info("Could not verify button text change, assuming success")
-                    return True
+                except Exception:
+                    pass
+
+                # Assume success if we got this far without errors
+                logger.info("Could not verify button change, but click succeeded - assuming added to cart")
+                return True
 
             # Fallback: Navigate to product page (old behavior)
             else:

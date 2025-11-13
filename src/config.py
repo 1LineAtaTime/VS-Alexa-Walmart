@@ -119,8 +119,16 @@ class Settings(BaseSettings):
 
     # Scheduling settings
     schedule_interval_minutes: int = Field(
+        default=3,
+        description="Interval between runs in minutes (deprecated - use min/max)"
+    )
+    schedule_interval_min_minutes: int = Field(
+        default=3,
+        description="Minimum interval between runs in minutes"
+    )
+    schedule_interval_max_minutes: int = Field(
         default=5,
-        description="Interval between runs in minutes"
+        description="Maximum interval between runs in minutes"
     )
 
     # Amazon URLs
