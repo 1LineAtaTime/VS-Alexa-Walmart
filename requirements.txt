@@ -1,0 +1,20 @@
+# Core dependencies
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Browser automation
+playwright>=1.40.0
+
+# OTP/2FA
+pyotp>=2.9.0
+
+# Fuzzy matching for item search
+rapidfuzz>=3.6.0
+
+# Logging
+loguru>=0.7.2
+
+# Testing (optional)
+pytest>=7.4.3
+pytest-playwright>=0.4.4
