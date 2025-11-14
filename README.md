@@ -16,9 +16,10 @@ This tool automatically:
 ### Prerequisites
 
 - Python 3.9 or higher
-- Chrome browser installed
+- Google Chrome installed (recommended) or Chromium
 - Amazon account with Alexa shopping list
 - Walmart account
+- For LXC: Proxmox host access for container configuration
 
 ### Installation
 
@@ -37,7 +38,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 3. Install dependencies:
 ```bash
 pip install -r requirements.txt
-playwright install chromium
+playwright install chromium  # Fallback if Chrome not installed
 ```
 
 4. Configure credentials:
@@ -62,6 +63,89 @@ python src/main.py
 ```bash
 APP_BROWSER_HEADLESS=false python src/main.py --once
 ```
+
+## Running in Proxmox LXC Container
+
+If you're running this in a Proxmox LXC container, you need to configure the container to allow Chrome/Chromium to access the network.
+
+### Required LXC Configuration
+
+**On the Proxmox host**, edit your container config file:
+
+```bash
+# Find your container ID
+pct list
+
+# Edit the config (replace <CTID> with your container ID)
+nano /etc/pve/lxc/<CTID>.conf
+```
+
+**Add these lines to the end of the file:**
+
+```
+lxc.apparmor.profile: unconfined
+lxc.cap.drop:
+lxc.mount.auto: proc:rw sys:rw
+```
+
+**Enable nesting:**
+
+```bash
+pct set <CTID> -features nesting=1
+```
+
+**Restart the container:**
+
+```bash
+pct restart <CTID>
+```
+
+### Install Google Chrome (Recommended)
+
+Chrome works better than Chromium for avoiding bot detection:
+
+```bash
+# Inside the LXC container
+cd /tmp
+wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y ./google-chrome-stable_current_amd64.deb
+sudo apt --fix-broken install  # If needed
+rm google-chrome-stable_current_amd64.deb
+```
+
+### Systemd Service Setup
+
+For continuous operation, set up a systemd service:
+
+```bash
+# Make setup script executable
+chmod +x setup-systemd.sh
+
+# Run setup (installs and enables service)
+./setup-systemd.sh
+
+# Start the service
+sudo systemctl start amazon-walmart-automation
+
+# View logs
+sudo journalctl -u amazon-walmart-automation -f
+```
+
+See [SYSTEMD.md](SYSTEMD.md) for detailed service management.
+
+### Troubleshooting LXC
+
+**If Chrome shows `ERR_INTERNET_DISCONNECTED`:**
+- Verify the LXC config has the 3 lines above
+- Ensure `features: nesting=1` is enabled
+- Restart the container after making changes
+
+**Test Chrome network access:**
+```bash
+google-chrome --headless --disable-gpu --dump-dom https://www.google.com
+```
+
+If this works, the automation will work too.
 
 ## How It Works
 

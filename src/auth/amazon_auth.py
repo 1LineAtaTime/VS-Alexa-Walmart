@@ -150,13 +150,19 @@ class AmazonAuthenticator:
             except Exception:
                 logger.warning("Could not find 'Keep me signed in' checkbox")
 
-            # Click Sign-In
+            # Click Sign-In and wait for navigation
             signin_button = self.page.locator("#signInSubmit")
             signin_button.click()
             logger.info("Clicked Sign-In")
 
-            # Wait a moment for the page to process
-            time.sleep(2)
+            # Wait for navigation to complete (to OTP page or success page)
+            try:
+                self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass  # Page might not navigate, that's okay
+
+            # Give extra time for any redirects or page loads
+            time.sleep(3)
 
             # Handle OTP if required
             self._handle_otp()
@@ -199,10 +205,14 @@ class AmazonAuthenticator:
             Exception: If OTP handling fails
         """
         try:
-            # Check if OTP is required
+            # Check if OTP is required - wait longer for page to load
             otp_input = None
             try:
-                otp_input = self.page.wait_for_selector("#auth-mfa-otpcode", timeout=3000)
+                # Try multiple selectors with longer timeout
+                otp_input = self.page.wait_for_selector(
+                    "#auth-mfa-otpcode, input[name='otpCode'], input[aria-label*='OTP'], input[aria-label*='code']",
+                    timeout=10000
+                )
             except TimeoutError:
                 logger.info("OTP not required")
                 return
