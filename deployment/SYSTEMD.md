@@ -21,12 +21,12 @@ Since the automation now runs continuously (checking every 3-5 minutes), you sho
 
 2. **Make the setup script executable:**
    ```bash
-   chmod +x setup-systemd.sh
+   chmod +x deployment/setup-systemd.sh
    ```
 
 3. **Run the setup script:**
    ```bash
-   ./setup-systemd.sh
+   ./deployment/setup-systemd.sh
    ```
 
 4. **Start the service:**
@@ -47,14 +47,14 @@ If you prefer to set up manually:
 
 1. **Edit the service file:**
    ```bash
-   nano amazon-walmart-automation.service
+   nano deployment/amazon-walmart-automation.service
    ```
 
    Replace `USER` with your actual username and adjust paths if needed.
 
 2. **Copy to systemd directory:**
    ```bash
-   sudo cp amazon-walmart-automation.service /etc/systemd/system/
+   sudo cp deployment/amazon-walmart-automation.service /etc/systemd/system/
    ```
 
 3. **Reload systemd:**

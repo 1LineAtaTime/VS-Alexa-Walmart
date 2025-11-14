@@ -119,10 +119,10 @@ For continuous operation, set up a systemd service:
 
 ```bash
 # Make setup script executable
-chmod +x setup-systemd.sh
+chmod +x deployment/setup-systemd.sh
 
 # Run setup (installs and enables service)
-./setup-systemd.sh
+./deployment/setup-systemd.sh
 
 # Start the service
 sudo systemctl start amazon-walmart-automation
@@ -131,7 +131,7 @@ sudo systemctl start amazon-walmart-automation
 sudo journalctl -u amazon-walmart-automation -f
 ```
 
-See [SYSTEMD.md](SYSTEMD.md) for detailed service management.
+See [deployment/SYSTEMD.md](deployment/SYSTEMD.md) for detailed service management.
 
 ### Troubleshooting LXC
 
@@ -216,6 +216,10 @@ VS-Alexa-Walmart/
 │   │   └── matcher.py
 │   └── utils/
 │       └── logger.py
+├── deployment/              # Systemd service files for Linux
+│   ├── setup-systemd.sh
+│   ├── amazon-walmart-automation.service
+│   └── SYSTEMD.md
 ├── credentials/             # Your credentials (gitignored)
 ├── logs/                    # Log files & screenshots (auto-generated)
 ├── requirements.txt
