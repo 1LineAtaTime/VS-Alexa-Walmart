@@ -157,17 +157,51 @@ class AmazonAuthenticator:
             signin_button.click()
             logger.info("Clicked Sign-In")
 
-            # Wait for navigation to complete (to OTP page or success page)
+            # Wait for the URL to change (either to OTP or success page)
+            initial_url = self.page.url
             try:
-                self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+                # Wait for URL to change from the signin page
+                self.page.wait_for_url(lambda url: url != initial_url, timeout=10000)
+                logger.info("URL changed after sign-in")
             except Exception:
-                pass  # Page might not navigate, that's okay
+                logger.warning("URL did not change after clicking Sign-In - may still be on sign-in page")
+
+            # Wait for page to fully load
+            try:
+                self.page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                # Try at least domcontentloaded
+                try:
+                    self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
 
             # Give extra time for any redirects or page loads
-            time.sleep(3)
+            time.sleep(2)
 
             # Debug: Log current URL to see where we are
-            logger.info(f"Current URL after sign-in: {self.page.url}")
+            current_url = self.page.url
+            logger.info(f"Current URL after sign-in: {current_url}")
+
+            # Check for error messages on the page
+            try:
+                error_box = self.page.locator("#auth-error-message-box, .a-alert-error, [data-a-alert-type='error']").first
+                if error_box.is_visible(timeout=2000):
+                    error_text = error_box.inner_text()
+                    logger.error(f"Amazon login error message: {error_text}")
+                    self._save_screenshot("amazon_login_error_message")
+                    raise Exception(f"Amazon login error: {error_text}")
+            except Exception as e:
+                if "Amazon login error:" in str(e):
+                    raise
+                # No error message found, that's okay
+
+            # If we're still on the sign-in page, something went wrong
+            if "/ap/signin" in current_url and "shopping" not in current_url:
+                logger.warning("Still on sign-in page after clicking Sign-In")
+                self._save_screenshot("amazon_stuck_on_signin")
+                # Take a screenshot to see what's on the page
+                logger.warning("Taking screenshot to debug - check logs/ directory")
 
             # Handle OTP if required
             self._handle_otp()
