@@ -141,14 +141,16 @@ class AmazonAuthenticator:
             password_input = self.page.wait_for_selector("#ap_password", timeout=10000)
             password_input.fill(settings.amazon_password)
 
-            # Check "Keep me signed in" checkbox
+            # Check "Keep me signed in" checkbox (with short timeout - it might not be here)
             try:
                 remember_checkbox = self.page.locator("#rememberMe")
-                if not remember_checkbox.is_checked():
+                # Use short timeout to avoid 30-second wait
+                if not remember_checkbox.is_checked(timeout=2000):
                     remember_checkbox.check()
                     logger.info("Checked 'Keep me signed in'")
             except Exception:
-                logger.warning("Could not find 'Keep me signed in' checkbox")
+                # Checkbox not found on password page - might be on OTP page
+                pass
 
             # Click Sign-In and wait for navigation
             signin_button = self.page.locator("#signInSubmit")
@@ -163,6 +165,9 @@ class AmazonAuthenticator:
 
             # Give extra time for any redirects or page loads
             time.sleep(3)
+
+            # Debug: Log current URL to see where we are
+            logger.info(f"Current URL after sign-in: {self.page.url}")
 
             # Handle OTP if required
             self._handle_otp()
@@ -205,6 +210,10 @@ class AmazonAuthenticator:
             Exception: If OTP handling fails
         """
         try:
+            # Check if we're on the OTP page by URL or selector
+            current_url = self.page.url.lower()
+            logger.info(f"Checking for OTP requirement (URL: {current_url})")
+
             # Check if OTP is required - wait longer for page to load
             otp_input = None
             try:
@@ -214,6 +223,11 @@ class AmazonAuthenticator:
                     timeout=10000
                 )
             except TimeoutError:
+                # Double-check by URL in case selector changed
+                if "mfa" in current_url or "otp" in current_url or "verify" in current_url:
+                    logger.warning("OTP page detected by URL but input field not found - taking screenshot")
+                    self._save_screenshot("amazon_otp_detection_issue")
+                    raise Exception("OTP page detected but input field not found")
                 logger.info("OTP not required")
                 return
 
@@ -230,14 +244,23 @@ class AmazonAuthenticator:
             # Enter OTP
             otp_input.fill(otp_code)
 
+            # Check "Keep me signed in" if available (might be on OTP page)
+            try:
+                remember_signin = self.page.locator("#rememberMe")
+                if not remember_signin.is_checked(timeout=2000):
+                    remember_signin.check()
+                    logger.info("Checked 'Keep me signed in'")
+            except Exception:
+                pass  # Not found, that's okay
+
             # Check "Don't require OTP on this device" if available
             try:
                 remember_device = self.page.locator("#auth-mfa-remember-device")
-                if not remember_device.is_checked():
+                if not remember_device.is_checked(timeout=2000):
                     remember_device.check()
                     logger.info("Checked 'Don't require OTP on this device'")
             except Exception:
-                logger.warning("Could not find 'Remember device' checkbox")
+                pass  # Not found, that's okay
 
             # Submit OTP
             submit_button = self.page.locator("#auth-signin-button")
