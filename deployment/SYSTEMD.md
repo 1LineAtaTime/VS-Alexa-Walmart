@@ -176,13 +176,13 @@ Environment="APP_BROWSER_HEADLESS=false"
 
 3. Verify Python virtual environment exists:
    ```bash
-   ls -la ~/VS-Alexa-Walmart/venv
+   ls -la ~/VS-Alexa-Walmart/.venv
    ```
 
 4. Test running manually:
    ```bash
    cd ~/VS-Alexa-Walmart
-   ./venv/bin/python src/main.py
+   ./.venv/bin/python src/main.py
    ```
 
 ### Credentials issues
@@ -284,7 +284,7 @@ When you pull new changes from git:
 
 3. **Update dependencies (if needed):**
    ```bash
-   ./venv/bin/pip install -r requirements.txt
+   ./.venv/bin/pip install -r requirements.txt
    ```
 
 4. **Restart the service:**

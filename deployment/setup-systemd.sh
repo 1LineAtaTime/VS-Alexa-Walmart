@@ -27,13 +27,13 @@ if [ ! -f "$SCRIPT_DIR/amazon-walmart-automation.service" ]; then
 fi
 
 # Check if virtual environment exists
-if [ ! -d "$PROJECT_ROOT/venv" ]; then
-    echo "WARNING: Virtual environment not found at $PROJECT_ROOT/venv"
+if [ ! -d "$PROJECT_ROOT/.venv" ]; then
+    echo "WARNING: Virtual environment not found at $PROJECT_ROOT/.venv"
     echo "Creating virtual environment..."
-    python3 -m venv "$PROJECT_ROOT/venv"
+    python3 -m venv "$PROJECT_ROOT/.venv"
     echo "Installing dependencies..."
-    "$PROJECT_ROOT/venv/bin/pip" install -r "$PROJECT_ROOT/requirements.txt"
-    "$PROJECT_ROOT/venv/bin/playwright" install chromium
+    "$PROJECT_ROOT/.venv/bin/pip" install -r "$PROJECT_ROOT/requirements.txt"
+    "$PROJECT_ROOT/.venv/bin/playwright" install chromium
 fi
 
 # Create temporary service file with user-specific paths
