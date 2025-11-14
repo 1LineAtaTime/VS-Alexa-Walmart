@@ -250,12 +250,47 @@ APP_SCHEDULE_INTERVAL_MINUTES=5  # Run every N minutes (default: 5)
 
 ## Troubleshooting
 
-**Authentication fails:**
+### Authentication Issues
+
+**Amazon authentication fails - Button click not working:**
+
+If you see logs like:
+- "Still on sign-in page after clicking Sign-In"
+- "URL did not change after clicking Sign-In"
+- "OTP not required" when it should be
+
+This indicates Amazon's bot detection is blocking the form submission. The code now uses multiple submission methods including JavaScript form submission to bypass this.
+
+**Solution:**
 ```bash
-# Delete cookies and try again with visible browser
+# 1. Delete old cookies
 rm credentials/*_cookies.json
-APP_BROWSER_HEADLESS=false python src/main.py --once
+
+# 2. Verify the fix is in place
+# Check that amazon_auth.py uses form.submit() method (already fixed)
+
+# 3. Test authentication
+python src/main.py --once
+
+# 4. Check logs for these success indicators:
+# - "Method 3: Submitting form directly with JavaScript..."
+# - "OTP page detected by URL"
+# - "OTP verification required"
+# - "Amazon authentication successful"
 ```
+
+**If authentication still fails:**
+- Amazon may be blocking your IP address - try from a different network
+- CAPTCHA may be required - the code will detect this and notify you
+- Check `logs/` directory for error screenshots
+- Verify OTP secret is correctly configured in `credentials/credentials.py`
+
+**OTP Issues:**
+- OTP codes are time-sensitive - ensure system clock is accurate
+- The code adds a 3-second delay before generating OTP for better sync
+- Check logs for "Generated OTP code" - should be 6 digits
+
+### General Issues
 
 **Items not matching:**
 - Adjust `APP_MIN_MATCH_SCORE` (lower = more lenient, higher = stricter)
