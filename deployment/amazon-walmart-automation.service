@@ -9,6 +9,7 @@ Type=simple
 User=USER
 WorkingDirectory=/home/USER/VS-Alexa-Walmart
 Environment="PATH=/home/USER/VS-Alexa-Walmart/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStartPre=/usr/bin/git -C /home/USER/VS-Alexa-Walmart pull
 ExecStart=/home/USER/VS-Alexa-Walmart/.venv/bin/python src/main.py
 
 # Restart policy
