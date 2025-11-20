@@ -126,7 +126,20 @@ rm google-chrome-stable_current_amd64.deb
 
 For continuous operation, set up a systemd service:
 
+⚠️ **Important**: The systemd service is configured to:
+- Run as **root user** (prevents permission issues with git pull)
+- Expect project location at `/home/VS-Alexa-Walmart`
+- Auto git pull on every service restart to stay updated
+
 ```bash
+# Ensure project is at the correct location
+# If not already there, move or clone to /home/VS-Alexa-Walmart
+cd /home
+git clone <repository-url> VS-Alexa-Walmart
+
+# Navigate to project
+cd /home/VS-Alexa-Walmart
+
 # Make setup script executable
 chmod +x deployment/setup-systemd.sh
 

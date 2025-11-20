@@ -18,6 +18,9 @@ CURRENT_USER=$(whoami)
 echo "Current user: $CURRENT_USER"
 echo "Project directory: $PROJECT_ROOT"
 echo ""
+echo "NOTE: Service is configured to run as root user at /home/VS-Alexa-Walmart"
+echo "      If your project is at a different location, you may need to adjust the service file manually."
+echo ""
 
 # Check if service file exists
 if [ ! -f "$SCRIPT_DIR/amazon-walmart-automation.service" ]; then
@@ -26,27 +29,19 @@ if [ ! -f "$SCRIPT_DIR/amazon-walmart-automation.service" ]; then
     exit 1
 fi
 
-# Check if virtual environment exists
-if [ ! -d "$PROJECT_ROOT/.venv" ]; then
-    echo "WARNING: Virtual environment not found at $PROJECT_ROOT/.venv"
+# Check if virtual environment exists at the expected location
+if [ ! -d "/home/VS-Alexa-Walmart/.venv" ]; then
+    echo "WARNING: Virtual environment not found at /home/VS-Alexa-Walmart/.venv"
     echo "Creating virtual environment..."
-    python3 -m venv "$PROJECT_ROOT/.venv"
+    python3 -m venv /home/VS-Alexa-Walmart/.venv
     echo "Installing dependencies..."
-    "$PROJECT_ROOT/.venv/bin/pip" install -r "$PROJECT_ROOT/requirements.txt"
-    "$PROJECT_ROOT/.venv/bin/playwright" install chromium
+    /home/VS-Alexa-Walmart/.venv/bin/pip install -r /home/VS-Alexa-Walmart/requirements.txt
+    /home/VS-Alexa-Walmart/.venv/bin/playwright install chromium
 fi
 
-# Create temporary service file with user-specific paths
-echo "Creating systemd service file..."
-TEMP_SERVICE=$(mktemp)
-sed -e "s|USER|$CURRENT_USER|g" \
-    -e "s|/home/USER/VS-Alexa-Walmart|$PROJECT_ROOT|g" \
-    "$SCRIPT_DIR/amazon-walmart-automation.service" > "$TEMP_SERVICE"
-
-# Copy to systemd directory
+# Copy service file directly (no replacement needed - paths are hardcoded)
 echo "Installing service (requires sudo)..."
-sudo cp "$TEMP_SERVICE" /etc/systemd/system/amazon-walmart-automation.service
-rm "$TEMP_SERVICE"
+sudo cp "$SCRIPT_DIR/amazon-walmart-automation.service" /etc/systemd/system/amazon-walmart-automation.service
 
 # Set permissions
 sudo chmod 644 /etc/systemd/system/amazon-walmart-automation.service

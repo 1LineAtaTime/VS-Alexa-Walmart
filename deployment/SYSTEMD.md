@@ -2,39 +2,57 @@
 
 This guide explains how to set up the Amazon-Walmart automation to run continuously as a systemd service on your Ubuntu LXC container.
 
+## Important Notes
+
+⚠️ **Default Configuration:**
+- The service is configured to run as **root user**
+- Project path is hardcoded to: `/home/VS-Alexa-Walmart`
+- This prevents permission issues with git pull on service restarts
+- If your project is at a different location, you'll need to manually edit the service file
+
 ## Why Systemd Instead of Cron?
 
-Since the automation now runs continuously (checking every 3-5 minutes), you should use **systemd** instead of cron:
+Since the automation now runs continuously (checking every 5 seconds), you should use **systemd** instead of cron:
 
 - ✅ Starts automatically on boot
 - ✅ Restarts automatically if the program crashes
 - ✅ Proper logging with `journalctl`
 - ✅ Easy to start/stop/restart
 - ✅ Better resource management
+- ✅ Auto git pull on every restart to stay updated
 
 ## Quick Setup (Recommended)
 
-1. **Navigate to the project directory:**
+1. **Ensure the project is located at `/home/VS-Alexa-Walmart`:**
    ```bash
-   cd ~/VS-Alexa-Walmart
+   # If not already there, clone or move the project:
+   cd /home
+   git clone <your-repo-url> VS-Alexa-Walmart
+   # OR move existing project:
+   # mv ~/VS-Alexa-Walmart /home/VS-Alexa-Walmart
    ```
 
-2. **Make the setup script executable:**
+2. **Navigate to the project directory:**
+   ```bash
+   cd /home/VS-Alexa-Walmart
+   ```
+
+3. **Make the setup script executable:**
    ```bash
    chmod +x deployment/setup-systemd.sh
    ```
 
-3. **Run the setup script:**
+4. **Run the setup script:**
    ```bash
    ./deployment/setup-systemd.sh
    ```
 
-4. **Start the service:**
+5. **Start the service:**
    ```bash
    sudo systemctl start amazon-walmart-automation
    ```
 
-5. **Check status:**
+6. **Check status:**
    ```bash
    sudo systemctl status amazon-walmart-automation
    ```
@@ -45,29 +63,35 @@ That's it! The service is now running and will start automatically on boot.
 
 If you prefer to set up manually:
 
-1. **Edit the service file:**
-   ```bash
-   nano deployment/amazon-walmart-automation.service
-   ```
+1. **Ensure project is at `/home/VS-Alexa-Walmart`** (service is configured for this path)
 
-   Replace `USER` with your actual username and adjust paths if needed.
-
-2. **Copy to systemd directory:**
+2. **Copy service file to systemd directory:**
    ```bash
    sudo cp deployment/amazon-walmart-automation.service /etc/systemd/system/
    ```
 
-3. **Reload systemd:**
+   Note: The service file is pre-configured for root user at `/home/VS-Alexa-Walmart`.
+   If you need different settings, edit the file before copying.
+
+3. **Set up virtual environment:**
+   ```bash
+   cd /home/VS-Alexa-Walmart
+   python3 -m venv .venv
+   .venv/bin/pip install -r requirements.txt
+   .venv/bin/playwright install chromium
+   ```
+
+4. **Reload systemd:**
    ```bash
    sudo systemctl daemon-reload
    ```
 
-4. **Enable the service:**
+5. **Enable the service:**
    ```bash
    sudo systemctl enable amazon-walmart-automation
    ```
 
-5. **Start the service:**
+6. **Start the service:**
    ```bash
    sudo systemctl start amazon-walmart-automation
    ```
@@ -176,12 +200,12 @@ Environment="APP_BROWSER_HEADLESS=false"
 
 3. Verify Python virtual environment exists:
    ```bash
-   ls -la ~/VS-Alexa-Walmart/.venv
+   ls -la /home/VS-Alexa-Walmart/.venv
    ```
 
 4. Test running manually:
    ```bash
-   cd ~/VS-Alexa-Walmart
+   cd /home/VS-Alexa-Walmart
    ./.venv/bin/python src/main.py
    ```
 
@@ -190,24 +214,27 @@ Environment="APP_BROWSER_HEADLESS=false"
 If you see authentication errors, ensure credentials are configured:
 
 ```bash
-ls -la ~/VS-Alexa-Walmart/credentials/credentials.py
+ls -la /home/VS-Alexa-Walmart/credentials/credentials.py
 ```
 
 If missing, copy from example:
 ```bash
+cd /home/VS-Alexa-Walmart
 cp credentials.py.example credentials/credentials.py
 nano credentials/credentials.py  # Edit with your credentials
 ```
 
 ### Permission issues
 
-Ensure the service runs as your user (not root):
+The service is configured to run as root by default:
 
 ```bash
 sudo systemctl cat amazon-walmart-automation | grep User=
 ```
 
-Should show `User=your-username`
+Should show `User=root`
+
+If you need to run as a different user, edit the service file and adjust paths accordingly.
 
 ### High memory usage
 

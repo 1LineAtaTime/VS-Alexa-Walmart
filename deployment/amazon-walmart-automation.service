@@ -5,12 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-# IMPORTANT: Replace USER with your actual username and adjust paths
-User=USER
-WorkingDirectory=/home/USER/VS-Alexa-Walmart
-Environment="PATH=/home/USER/VS-Alexa-Walmart/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStartPre=/usr/bin/git -C /home/USER/VS-Alexa-Walmart pull
-ExecStart=/home/USER/VS-Alexa-Walmart/.venv/bin/python src/main.py
+# Configured to run as root user with project at /home/VS-Alexa-Walmart
+User=root
+WorkingDirectory=/home/VS-Alexa-Walmart
+Environment="PATH=/home/VS-Alexa-Walmart/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStartPre=/usr/bin/git -C /home/VS-Alexa-Walmart pull
+ExecStart=/home/VS-Alexa-Walmart/.venv/bin/python src/main.py
 
 # Restart policy
 Restart=always
