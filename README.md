@@ -6,10 +6,13 @@ Automates the process of transferring shopping list items from Amazon Alexa to y
 
 This tool automatically:
 1. Authenticates with Amazon and Walmart
-2. Scrapes items from your Amazon Alexa shopping list
-3. Saves items to a local text file and clears the Amazon list
-4. Searches for matching products on Walmart and adds them to your cart
-5. Uses "My Items" (previously purchased) as a fallback for better matching
+2. Continuously monitors your Amazon Alexa shopping list (checks every 5 seconds)
+3. When items are detected, scrapes and saves them to a local text file
+4. Clears items from the Amazon list
+5. Searches for matching products on Walmart and adds them to your cart
+6. Uses "My Items" (previously purchased) as a fallback for better matching
+7. If My Items fails, tries adding the first 10 items from search results sequentially
+8. Sends Alexa voice notifications via Home Assistant for any items that fail to add
 
 ## Quick Start
 
@@ -54,7 +57,7 @@ cp credentials/credentials.py.example credentials/credentials.py
 python src/main.py --once
 ```
 
-**Run on schedule (every 5 minutes):**
+**Run with continuous monitoring (checks every 5 seconds, refreshes every 10-15 minutes):**
 ```bash
 python src/main.py
 ```
@@ -63,6 +66,12 @@ python src/main.py
 ```bash
 APP_BROWSER_HEADLESS=false python src/main.py --once
 ```
+
+The continuous monitoring mode will:
+- Check for new items every 5 seconds
+- Refresh the Amazon page every 10-15 minutes (random interval) if no new items
+- Process items immediately when detected
+- Keep browsers open between checks to save resources
 
 ## Running in Proxmox LXC Container
 
@@ -170,20 +179,39 @@ The automation is organized into 4 modules:
 - Searches Walmart catalog for each item
 - Selects top product based on purchase frequency
 - Attempts to add from search results
-- **Fallback**: If search fails, searches "My Items" (previously purchased items) using fuzzy matching
+- **Fallback 1**: If search fails, searches "My Items" (previously purchased items) using fuzzy matching
 - Batch processes all failed items in a single My Items scan for efficiency
+- **Fallback 2**: If My Items fails, tries adding the first 10 items from search results sequentially
+- **Fallback 3**: Sends Alexa voice notification via Home Assistant for any items that still fail
 
 ## Key Features
+
+### Continuous Monitoring
+- Checks Alexa shopping list every 5 seconds for new items
+- Automatically refreshes page every 10-15 minutes (random interval) to prevent session timeouts
+- Processes items immediately when detected
+- No manual intervention needed
 
 ### Smart Matching
 - Uses product name from search results for better fuzzy matching
 - Prioritizes "frequently bought" items
 - Higher match score threshold (60) for My Items to avoid false positives
 
+### Triple Fallback System
+1. **Primary**: Add top product from Walmart search results
+2. **Fallback 1**: Batch search through "My Items" (previously purchased) with fuzzy matching
+3. **Fallback 2**: Try adding first 10 items from search results sequentially
+4. **Notification**: Alexa voice alert via Home Assistant for any failures
+
 ### Batch My Items Fallback
 - Processes multiple failed items efficiently
 - Single scan through My Items for all failed items
 - Navigates to specific My Items page for each matched product
+
+### Home Assistant Integration
+- Sends Alexa voice notifications for failed items
+- Example: "Attention. I could not add milk to the Walmart cart"
+- Requires Alexa Media Player integration in Home Assistant
 
 ### Persistent Browser Sessions
 - Keeps browser open between scheduled runs
@@ -240,16 +268,55 @@ AMAZON_OTP_SECRET = "your-otp-secret"  # For 2FA
 # Walmart credentials
 WALMART_EMAIL = "your-email@example.com"
 WALMART_PASSWORD = "your-password"
+
+# Home Assistant (optional - for Alexa notifications)
+HOME_ASSISTANT_URL = "http://homeassistant.local:8123"
+HOME_ASSISTANT_TOKEN = "your-long-lived-access-token"
+HOME_ASSISTANT_ALEXA_ENTITY = "media_player.echo_show"
 ```
+
+### Home Assistant Setup (Optional)
+
+To enable Alexa voice notifications for failed items:
+
+1. **Install Alexa Media Player integration in Home Assistant:**
+   - Go to Settings → Devices & Services → Add Integration
+   - Search for "Alexa Media Player" and install
+   - Follow the setup wizard to connect your Amazon account
+
+2. **Create a Long-Lived Access Token:**
+   - In Home Assistant, click your profile (bottom left), then Security tab
+   - Scroll down to "Long-Lived Access Tokens"
+   - Click "Create Token"
+   - Give it a name like "Amazon Walmart Automation"
+   - Copy the token and paste it in `credentials.py`
+
+3. **Find your Alexa device entity ID:**
+   - Go to Settings → Devices & Services → Entities
+   - Search for your Echo device (e.g., "Echo Show")
+   - Copy the entity ID (e.g., `media_player.echo_show`)
+   - Paste it in `credentials.py`
+
+4. **Test the connection:**
+   ```python
+   from src.notifications import HomeAssistantNotifier
+   notifier = HomeAssistantNotifier()
+   notifier.test_connection()
+   ```
+
+If configured correctly, when items fail to add to the Walmart cart, your Echo will announce: "Attention. I could not add [item names] to the Walmart cart"
 
 ### Environment Variables
 
 All settings can be overridden with `APP_` prefix:
 
 ```bash
-APP_BROWSER_HEADLESS=false    # Show browser (default: true)
-APP_MIN_MATCH_SCORE=70        # Fuzzy match threshold (default: 70)
-APP_SCHEDULE_INTERVAL_MINUTES=5  # Run every N minutes (default: 5)
+APP_BROWSER_HEADLESS=false              # Show browser (default: true)
+APP_MIN_MATCH_SCORE=70                  # Fuzzy match threshold (default: 70)
+APP_MONITOR_INTERVAL_SECONDS=5          # Check interval (default: 5)
+APP_SCHEDULE_INTERVAL_MIN_MINUTES=10    # Min refresh interval (default: 10)
+APP_SCHEDULE_INTERVAL_MAX_MINUTES=15    # Max refresh interval (default: 15)
+APP_SEARCH_FALLBACK_MAX_ITEMS=10        # Max items to try from search (default: 10)
 ```
 
 ## Troubleshooting

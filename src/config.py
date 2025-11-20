@@ -73,6 +73,20 @@ class Settings(BaseSettings):
         description="Walmart account password"
     )
 
+    # Home Assistant credentials (for Alexa notifications)
+    home_assistant_url: str = Field(
+        default=getattr(credentials, 'HOME_ASSISTANT_URL', ""),
+        description="Home Assistant URL (e.g., http://homeassistant.local:8123)"
+    )
+    home_assistant_token: str = Field(
+        default=getattr(credentials, 'HOME_ASSISTANT_TOKEN', ""),
+        description="Home Assistant long-lived access token"
+    )
+    home_assistant_alexa_entity: str = Field(
+        default=getattr(credentials, 'HOME_ASSISTANT_ALEXA_ENTITY', ""),
+        description="Alexa Media Player entity ID (e.g., media_player.echo_show)"
+    )
+
     # Browser settings
     browser_headless: bool = Field(
         default=True,  # Set to True for production (headless). Use --headed flag or APP_BROWSER_HEADLESS=false for debugging
@@ -106,6 +120,10 @@ class Settings(BaseSettings):
         default=1.0,
         description="Delay between searches in seconds"
     )
+    search_fallback_max_items: int = Field(
+        default=10,
+        description="Maximum items to try from search results as fallback (if My Items fails)"
+    )
 
     # Matching settings
     min_match_score: int = Field(
@@ -123,12 +141,16 @@ class Settings(BaseSettings):
         description="Interval between runs in minutes (deprecated - use min/max)"
     )
     schedule_interval_min_minutes: int = Field(
-        default=3,
-        description="Minimum interval between runs in minutes"
+        default=10,
+        description="Minimum interval for page refresh in minutes (when monitoring)"
     )
     schedule_interval_max_minutes: int = Field(
+        default=15,
+        description="Maximum interval for page refresh in minutes (when monitoring)"
+    )
+    monitor_interval_seconds: int = Field(
         default=5,
-        description="Maximum interval between runs in minutes"
+        description="Interval between checks when actively monitoring for new items"
     )
 
     # Amazon URLs

@@ -31,10 +31,15 @@ class AmazonListScraper:
         logger.info("Scraping Amazon shopping list")
 
         try:
-            # Navigate to shopping list
-            self.page.goto(settings.amazon_list_url, wait_until="domcontentloaded")
-            logger.info(f"Navigated to {settings.amazon_list_url}")
-            time.sleep(3)  # Wait for dynamic content to load
+            # Only navigate if we're not already on the shopping list page
+            current_url = self.page.url
+            if "alexa-shopping-list" not in current_url:
+                logger.info("Not on shopping list page, navigating...")
+                self.page.goto(settings.amazon_list_url, wait_until="domcontentloaded")
+                logger.info(f"Navigated to {settings.amazon_list_url}")
+                time.sleep(3)  # Wait for dynamic content to load
+            else:
+                logger.debug("Already on shopping list page, skipping navigation")
 
             # Look for the list container
             # Amazon's Alexa shopping list typically uses specific data attributes

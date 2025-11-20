@@ -22,6 +22,7 @@ from src.auth import AmazonAuthenticator, WalmartAuthenticator
 from src.amazon import AmazonListScraper, AmazonListClearer
 from src.walmart import WalmartProductSearch, WalmartCartManager
 from src.search.matcher import ItemMatcher
+from src.notifications import HomeAssistantNotifier
 
 
 class AmazonWalmartAutomation:
@@ -364,6 +365,93 @@ class AmazonWalmartAutomation:
                     logger.error(f"Error during My Items batch fallback: {e}")
                     failed_items.extend([f['item'] for f in items_needing_fallback])
 
+            # SEARCH FALLBACK - Try first 10 items from search if My Items failed
+            # This handles items that couldn't be matched in My Items
+            items_for_search_fallback = []
+            for fallback_info in items_needing_fallback:
+                item = fallback_info['item']
+                # Check if this item is still in failed_items (meaning My Items didn't work)
+                if item in failed_items:
+                    items_for_search_fallback.append(fallback_info)
+                    # Remove from failed_items temporarily - we'll add back if search fallback also fails
+                    failed_items.remove(item)
+
+            if items_for_search_fallback:
+                logger.info("\n" + "="*70)
+                logger.info("SEARCH FALLBACK - Trying First 10 Items from Search")
+                logger.info("="*70)
+                logger.info(f"{len(items_for_search_fallback)} item(s) still need to be added")
+                logger.info("Will try adding the first 10 items from search results for each...")
+
+                for fallback_info in items_for_search_fallback:
+                    item = fallback_info['item']
+                    logger.info(f"\n--- Search Fallback for: {item['name']} ---")
+
+                    try:
+                        # Search again
+                        logger.info(f"Re-searching Walmart for '{item['name']}'...")
+                        products = walmart_search.search_products(
+                            query=item['name'],
+                            max_results=settings.search_fallback_max_items
+                        )
+
+                        if not products:
+                            logger.warning(f"No products found in search, giving up")
+                            failed_items.append(item)
+                            continue
+
+                        # Try adding items sequentially (first 10)
+                        max_tries = min(len(products), settings.search_fallback_max_items)
+                        logger.info(f"Found {len(products)} products, will try first {max_tries}...")
+
+                        added = False
+                        for try_idx, product in enumerate(products[:max_tries], 1):
+                            logger.info(f"\n  Try {try_idx}/{max_tries}: {product['name']}")
+                            logger.info(f"    Price: ${product['price']}, Bought: {product.get('bought_count', 0)}+")
+
+                            # Check stock
+                            if not product.get('in_stock', True):
+                                logger.warning(f"    Out of stock, trying next...")
+                                continue
+
+                            # Find product element
+                            product_element = walmart_search.find_product_element_by_id(product['id'])
+                            if not product_element:
+                                logger.warning(f"    Could not find product element, trying next...")
+                                continue
+
+                            # Try adding to cart
+                            try:
+                                success = walmart_cart.add_to_cart(
+                                    item_id=product['id'],
+                                    quantity=item['quantity'],
+                                    product_element=product_element
+                                )
+
+                                if success:
+                                    logger.success(f"  ✓ Successfully added '{product['name']}' from search fallback!")
+                                    successfully_added.append(item)
+                                    added = True
+                                    break
+                                else:
+                                    logger.warning(f"    Failed to add, trying next...")
+
+                            except Exception as e:
+                                logger.warning(f"    Error adding: {e}, trying next...")
+                                continue
+
+                            time.sleep(1)  # Small delay between tries
+
+                        if not added:
+                            logger.error(f"✗ All {max_tries} search attempts failed for '{item['name']}'")
+                            failed_items.append(item)
+
+                    except Exception as e:
+                        logger.error(f"Error during search fallback: {e}")
+                        failed_items.append(item)
+
+                    time.sleep(2)  # Delay between items
+
             # Summary
             logger.info("\n" + "="*70)
             logger.info("AUTOMATION SUMMARY")
@@ -376,6 +464,14 @@ class AmazonWalmartAutomation:
                 logger.warning("Failed items:")
                 for item in failed_items:
                     logger.warning(f"  - {item['name']}")
+
+                # Send notification via Home Assistant Alexa
+                logger.info("\nSending notification for failed items...")
+                try:
+                    notifier = HomeAssistantNotifier()
+                    notifier.notify_failed_items(failed_items)
+                except Exception as e:
+                    logger.warning(f"Failed to send notification: {e}")
 
             logger.info("="*70)
             logger.success("AUTOMATION COMPLETED!")
@@ -414,8 +510,10 @@ class AmazonWalmartAutomation:
             return False
 
     def run_scheduled(self) -> None:
-        """Run automation on a schedule (random interval) with persistent browser."""
-        logger.info(f"Starting scheduled automation (random interval: {settings.schedule_interval_min_minutes}-{settings.schedule_interval_max_minutes} minutes)")
+        """Run automation with continuous monitoring (checks every 5 seconds, refreshes page every 10-15 minutes)."""
+        logger.info("Starting continuous monitoring mode")
+        logger.info(f"  - Checking for new items every {settings.monitor_interval_seconds} seconds")
+        logger.info(f"  - Refreshing page every {settings.schedule_interval_min_minutes}-{settings.schedule_interval_max_minutes} minutes if no new items")
         logger.info("Browsers will stay open between runs to save resources")
         logger.info("Press Ctrl+C to stop")
 
@@ -428,35 +526,79 @@ class AmazonWalmartAutomation:
         logger.success("Amazon authentication complete")
         logger.info("Walmart will authenticate only when items are found in the shopping list")
 
+        # Track time since last refresh
+        last_refresh_time = time.time()
+        # Generate first refresh interval (random between min and max minutes)
+        next_refresh_interval = random.randint(
+            settings.schedule_interval_min_minutes,
+            settings.schedule_interval_max_minutes
+        ) * 60  # Convert to seconds
+
+        logger.info(f"\nStarting continuous monitoring...")
+        logger.info(f"Next page refresh in {next_refresh_interval // 60} minutes (at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + next_refresh_interval))})\n")
+
         while not self.should_stop:
             try:
-                # Run automation (browsers stay open)
-                self.run_once()
+                # Check if it's time to refresh the page
+                time_since_refresh = time.time() - last_refresh_time
+                if time_since_refresh >= next_refresh_interval:
+                    logger.info("\n" + "="*70)
+                    logger.info("REFRESHING PAGE (periodic refresh)")
+                    logger.info("="*70)
+                    try:
+                        self.amazon_page.reload(wait_until="domcontentloaded")
+                        time.sleep(3)
+                        logger.info("Page refreshed successfully")
+                    except Exception as e:
+                        logger.warning(f"Error refreshing page: {e}")
 
-                # Wait for next run with random interval
-                if not self.should_stop:
-                    # Generate random wait time between min and max
-                    wait_minutes = random.randint(
+                    # Reset timer and generate new random interval
+                    last_refresh_time = time.time()
+                    next_refresh_interval = random.randint(
                         settings.schedule_interval_min_minutes,
                         settings.schedule_interval_max_minutes
-                    )
-                    wait_seconds = wait_minutes * 60
+                    ) * 60
+                    logger.info(f"Next page refresh in {next_refresh_interval // 60} minutes\n")
 
-                    logger.info(f"\nBrowsers staying open...")
-                    logger.info(f"Waiting {wait_minutes} minutes until next run (random interval: {settings.schedule_interval_min_minutes}-{settings.schedule_interval_max_minutes} min)...")
-                    logger.info(f"Next run at: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + wait_seconds))}\n")
+                # Check for items (browsers stay open)
+                logger.debug(f"Checking for items... (next refresh in {(next_refresh_interval - time_since_refresh) / 60:.1f} minutes)")
 
-                    # Sleep in small increments to allow for interruption
-                    for _ in range(wait_seconds):
-                        if self.should_stop:
-                            break
-                        time.sleep(1)
+                # Navigate to shopping list if not already there
+                if "alexa-shopping-list" not in self.amazon_page.url:
+                    self.amazon_page.goto(settings.amazon_list_url, wait_until="domcontentloaded")
+                    time.sleep(2)
+
+                # Quick check for items
+                amazon_scraper = AmazonListScraper(self.amazon_page)
+                items = amazon_scraper.scrape_list()
+
+                if items:
+                    logger.info("\n" + "="*70)
+                    logger.info(f"FOUND {len(items)} NEW ITEMS!")
+                    logger.info("="*70)
+
+                    # Process the items
+                    self.run_once()
+
+                    # Reset refresh timer after processing items
+                    last_refresh_time = time.time()
+                    next_refresh_interval = random.randint(
+                        settings.schedule_interval_min_minutes,
+                        settings.schedule_interval_max_minutes
+                    ) * 60
+
+                    logger.info(f"\nResuming continuous monitoring...")
+                    logger.info(f"Next page refresh in {next_refresh_interval // 60} minutes\n")
+
+                # Wait before next check
+                if not self.should_stop:
+                    time.sleep(settings.monitor_interval_seconds)
 
             except KeyboardInterrupt:
                 logger.info("\nReceived interrupt signal")
                 break
             except Exception as e:
-                logger.error(f"Error in scheduled run: {e}")
+                logger.error(f"Error in monitoring loop: {e}")
                 logger.warning("Will retry in 60 seconds...")
                 time.sleep(60)
 
