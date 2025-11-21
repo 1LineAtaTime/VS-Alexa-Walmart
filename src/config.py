@@ -96,6 +96,14 @@ class Settings(BaseSettings):
         default=30000,
         description="Browser timeout in milliseconds"
     )
+    browser_restart_hours: int = Field(
+        default=6,
+        description="Hours between browser restarts (memory leak prevention)"
+    )
+    gc_interval_minutes: int = Field(
+        default=30,
+        description="Minutes between garbage collection runs (memory leak prevention)"
+    )
 
     # Session settings
     cookies_dir: str = Field(

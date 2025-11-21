@@ -120,7 +120,10 @@ class WalmartProductSearch:
             # Extract products in order by iterating through cards
             product_data_by_id = {}
 
-            for card_index, card in enumerate(all_product_cards[:max_results * 2]):  # Process more cards to ensure we get enough products
+            # Limit cards processed to prevent memory buildup
+            cards_to_process = all_product_cards[:max_results * 2]
+
+            for card_index, card in enumerate(cards_to_process):  # Process more cards to ensure we get enough products
                 try:
                     # First try to get ID directly from the card's data-item-id attribute
                     item_id = None
@@ -215,6 +218,11 @@ class WalmartProductSearch:
 
             # Sort by bought_count (highest first), then by price (lowest first)
             products.sort(key=lambda x: (x.get('bought_count', 0), -x.get('price', 999999)), reverse=True)
+
+            # Memory leak prevention: Clear large locator references
+            del all_product_cards
+            del cards_to_process
+            del product_data_by_id
 
             logger.success(f"Found {len(products)} products for '{query}'")
 

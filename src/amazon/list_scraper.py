@@ -131,14 +131,13 @@ class AmazonListScraper:
                         logger.warning(f"Failed to parse item {index}: {e}")
                         continue
 
+                # Memory leak prevention: Clear locator references
+                del delete_buttons
+
             except TimeoutError:
                 logger.warning("Could not find standard list items, trying alternative method")
 
-                # Method 2: Try to get list from page content
-                page_content = self.page.content()
-
-                # Look for specific patterns in the HTML
-                # This is a fallback and might need adjustment based on actual page structure
+                # Method 2: Alternative scraping (placeholder for future implementation)
                 logger.info("Using fallback scraping method")
 
             # Method 3: Check if list is empty

@@ -6,6 +6,7 @@ import time
 import signal
 import argparse
 import random
+import gc
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -56,6 +57,10 @@ class AmazonWalmartAutomation:
 
         # Store headless preference (None = use config, True/False = override)
         self.headless = headless if headless is not None else settings.browser_headless
+
+        # Memory leak prevention: Track browser lifetime and garbage collection
+        self.browser_start_time = None
+        self.last_gc_time = None
 
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -514,17 +519,25 @@ class AmazonWalmartAutomation:
         logger.info("Starting continuous monitoring mode")
         logger.info(f"  - Checking for new items every {settings.monitor_interval_seconds} seconds")
         logger.info(f"  - Refreshing page every {settings.schedule_interval_min_minutes}-{settings.schedule_interval_max_minutes} minutes if no new items")
+        logger.info(f"  - Browser restart every {settings.browser_restart_hours} hours (memory leak prevention)")
+        logger.info(f"  - Garbage collection every {settings.gc_interval_minutes} minutes")
         logger.info("Browsers will stay open between runs to save resources")
         logger.info("Press Ctrl+C to stop")
 
         # Initialize browser once
         self._init_browser()
+        self.browser_start_time = time.time()
+        self.last_gc_time = time.time()
 
         # Authenticate with Amazon only (Walmart will open on-demand when items are found)
         logger.info("Initial Amazon authentication...")
         self.amazon_page = self._authenticate_amazon()
         logger.success("Amazon authentication complete")
         logger.info("Walmart will authenticate only when items are found in the shopping list")
+
+        # Create scraper instance ONCE and reuse (prevents memory leak from creating 720 instances/hour)
+        amazon_scraper = AmazonListScraper(self.amazon_page)
+        logger.info("Created reusable Amazon scraper instance")
 
         # Track time since last refresh
         last_refresh_time = time.time()
@@ -539,6 +552,31 @@ class AmazonWalmartAutomation:
 
         while not self.should_stop:
             try:
+                # Check if browser needs restart (memory leak prevention)
+                browser_uptime_hours = (time.time() - self.browser_start_time) / 3600
+                if browser_uptime_hours >= settings.browser_restart_hours:
+                    logger.info("\n" + "="*70)
+                    logger.info(f"BROWSER RESTART (uptime: {browser_uptime_hours:.1f} hours)")
+                    logger.info("="*70)
+                    try:
+                        self._restart_browser()
+                        # Recreate scraper with new page
+                        amazon_scraper = AmazonListScraper(self.amazon_page)
+                        self.browser_start_time = time.time()
+                        last_refresh_time = time.time()
+                        logger.success("Browser restarted successfully")
+                    except Exception as e:
+                        logger.error(f"Error restarting browser: {e}")
+                        logger.warning("Continuing with existing browser...")
+
+                # Periodic garbage collection (memory leak prevention)
+                gc_elapsed_minutes = (time.time() - self.last_gc_time) / 60
+                if gc_elapsed_minutes >= settings.gc_interval_minutes:
+                    logger.debug(f"Running garbage collection (last GC: {gc_elapsed_minutes:.1f} min ago)")
+                    collected = gc.collect()
+                    logger.debug(f"Garbage collection: freed {collected} objects")
+                    self.last_gc_time = time.time()
+
                 # Check if it's time to refresh the page
                 time_since_refresh = time.time() - last_refresh_time
                 if time_since_refresh >= next_refresh_interval:
@@ -546,7 +584,8 @@ class AmazonWalmartAutomation:
                     logger.info("REFRESHING PAGE (periodic refresh)")
                     logger.info("="*70)
                     try:
-                        self.amazon_page.reload(wait_until="domcontentloaded")
+                        # Use goto instead of reload to properly clear cached resources
+                        self.amazon_page.goto(settings.amazon_list_url, wait_until="domcontentloaded")
                         time.sleep(3)
                         logger.info("Page refreshed successfully")
                     except Exception as e:
@@ -568,8 +607,7 @@ class AmazonWalmartAutomation:
                     self.amazon_page.goto(settings.amazon_list_url, wait_until="domcontentloaded")
                     time.sleep(2)
 
-                # Quick check for items
-                amazon_scraper = AmazonListScraper(self.amazon_page)
+                # Quick check for items using REUSED scraper instance
                 items = amazon_scraper.scrape_list()
 
                 if items:
@@ -631,6 +669,57 @@ class AmazonWalmartAutomation:
         )
 
         logger.success(f"Browser launched (headless={self.headless})")
+
+    def _restart_browser(self) -> None:
+        """Restart browser to clear accumulated memory and renderer processes.
+
+        This is a critical memory leak prevention measure that:
+        - Closes all browser contexts and pages
+        - Terminates Chrome renderer processes
+        - Reinitializes browser with clean state
+        - Re-authenticates with Amazon
+        """
+        logger.info("Restarting browser to prevent memory leaks...")
+
+        try:
+            # Close existing sessions
+            if self.amazon_auth:
+                self.amazon_auth.close()
+                self.amazon_auth = None
+            if self.walmart_auth:
+                self.walmart_auth.close()
+                self.walmart_auth = None
+
+            # Close browser and playwright
+            if self.browser:
+                self.browser.close()
+                self.browser = None
+            if self.playwright:
+                self.playwright.stop()
+                self.playwright = None
+
+            # Reset page references
+            self.amazon_page = None
+            self.walmart_page = None
+            self.walmart_initially_authenticated = False
+
+            # Force garbage collection to clear Python object references
+            gc.collect()
+
+            # Wait a moment for processes to fully terminate
+            time.sleep(2)
+
+            # Reinitialize browser
+            self._init_browser()
+
+            # Re-authenticate with Amazon
+            logger.info("Re-authenticating with Amazon after browser restart...")
+            self.amazon_page = self._authenticate_amazon()
+            logger.success("Amazon re-authentication complete")
+
+        except Exception as e:
+            logger.error(f"Error during browser restart: {e}")
+            raise
 
     def _authenticate_amazon(self):
         """Authenticate with Amazon.
