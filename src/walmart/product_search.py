@@ -672,54 +672,77 @@ class WalmartProductSearch:
             return []
 
     def _handle_bot_detection(self) -> None:
-        """Handle Walmart's 'Press & Hold' bot detection challenge."""
+        """Handle Walmart's 'Press & Hold' bot detection challenge.
+
+        The challenge is rendered by PerimeterX/HUMAN using canvas/shadow DOM
+        that is NOT accessible through normal DOM selectors.
+        """
         try:
             time.sleep(2)
 
-            # Check if bot detection challenge is present
-            robot_check_text = self.page.locator("text='Robot or human?'").first
-            if robot_check_text.count() > 0 and robot_check_text.is_visible(timeout=2000):
-                logger.info("Bot detection challenge detected! Handling Press & Hold...")
+            page_text = self.page.content()
+            is_bot_challenge = (
+                self.page.locator("text='Robot or human?'").count() > 0
+                or "Robot or human" in page_text
+                or "PRESS & HOLD" in page_text
+            )
 
-                # The "PRESS & HOLD" element is NOT a <button> - it's a custom element
-                btn_locator = None
-                press_hold_selectors = [
-                    "text='PRESS & HOLD'",
-                    "text='Press & Hold'",
-                    "[aria-label*='hold' i]",
-                    "button",
-                ]
+            if not is_bot_challenge:
+                return
 
-                for selector in press_hold_selectors:
-                    try:
-                        element = self.page.locator(selector).first
-                        if element.count() > 0 and element.is_visible(timeout=2000):
-                            btn_locator = element
-                            logger.info(f"Found Press & Hold element with selector: {selector}")
-                            break
-                    except Exception:
-                        continue
+            logger.info("Bot detection challenge detected! Handling Press & Hold...")
 
-                if btn_locator:
-                    box = btn_locator.bounding_box()
-                    if box:
-                        x = box['x'] + box['width'] / 2
-                        y = box['y'] + box['height'] / 2
+            # Try selectors first, fall back to coordinate-based clicking
+            btn_locator = None
+            for selector in ["text='PRESS & HOLD'", "text='Press & Hold'", "button"]:
+                try:
+                    element = self.page.locator(selector).first
+                    if element.count() > 0 and element.is_visible(timeout=2000):
+                        btn_locator = element
+                        break
+                except Exception:
+                    continue
 
-                        self.page.mouse.move(x, y)
-
-                        self.page.mouse.down()
-                        logger.info("Holding button for 10 seconds...")
-                        time.sleep(10)
-                        self.page.mouse.up()
-
-                        logger.success("Released button, waiting for verification")
-                        time.sleep(5)
-
-                        logger.success("Bot detection challenge handled")
+            if btn_locator:
+                box = btn_locator.bounding_box()
+                if box:
+                    x = box['x'] + box['width'] / 2
+                    y = box['y'] + box['height'] / 2
                 else:
-                    logger.error("Could not find Press & Hold element!")
-                    self._save_screenshot("walmart_no_press_hold_button")
+                    viewport = self.page.viewport_size
+                    x = viewport['width'] / 2
+                    y = viewport['height'] * 0.25
+            else:
+                # Button is in shadow DOM/canvas - use known coordinates
+                viewport = self.page.viewport_size
+                x = viewport['width'] / 2
+                y = viewport['height'] * 0.25
+                logger.info(f"Using coordinate-based click at ({x}, {y})")
+
+            for attempt in range(3):
+                logger.info(f"Press & Hold attempt {attempt + 1}/3 at ({x}, {y})")
+                self.page.mouse.move(x, y)
+                time.sleep(0.5)
+                self.page.mouse.down()
+                hold_time = 10 + attempt * 2
+                logger.info(f"Holding for {hold_time} seconds...")
+                time.sleep(hold_time)
+                self.page.mouse.up()
+                time.sleep(5)
+
+                try:
+                    if self.page.locator("text='Robot or human?'").count() == 0:
+                        logger.success("Bot detection challenge passed!")
+                        return
+                except Exception:
+                    return  # If we can't check, assume it passed
+
+                logger.warning(f"Challenge still present after attempt {attempt + 1}")
+                time.sleep(2)
+
+            logger.error("Failed to pass bot detection after 3 attempts")
+            self._save_screenshot("walmart_bot_detection_failed")
+
         except Exception as e:
             logger.debug(f"No bot detection to handle or error: {e}")
 
