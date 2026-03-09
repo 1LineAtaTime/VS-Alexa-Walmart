@@ -14,7 +14,7 @@ from datetime import datetime
 # Add parent directory to path so we can import src modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from playwright.sync_api import sync_playwright, Browser, Page, TimeoutError
+from playwright.sync_api import sync_playwright, BrowserContext, Page, TimeoutError
 from loguru import logger
 
 from src.config import settings
@@ -29,12 +29,8 @@ from src.notifications import HomeAssistantNotifier
 class AmazonWalmartAutomation:
     """Main automation orchestrator with persistent browser sessions."""
 
-    def __init__(self, headless: Optional[bool] = None):
-        """Initialize the automation.
-
-        Args:
-            headless: Override browser headless setting (None = use settings.browser_headless)
-        """
+    def __init__(self):
+        """Initialize the automation."""
         # Setup logging
         setup_logger(
             log_level=settings.log_level,
@@ -42,7 +38,7 @@ class AmazonWalmartAutomation:
         )
 
         self.playwright = None
-        self.browser: Optional[Browser] = None
+        self.context: Optional[BrowserContext] = None
         self.amazon_auth: Optional[AmazonAuthenticator] = None
         self.walmart_auth: Optional[WalmartAuthenticator] = None
 
@@ -55,8 +51,9 @@ class AmazonWalmartAutomation:
         # Track whether we've done initial Walmart authentication
         self.walmart_initially_authenticated = False
 
-        # Store headless preference (None = use config, True/False = override)
-        self.headless = headless if headless is not None else settings.browser_headless
+        # Persistent browser profile directory
+        self.profile_dir = Path("credentials/.playwright_profile")
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
 
         # Memory leak prevention: Track browser lifetime and garbage collection
         self.browser_start_time = None
@@ -85,7 +82,7 @@ class AmazonWalmartAutomation:
 
         try:
             # Initialize browser if not already done
-            if not self.browser:
+            if not self.context:
                 self._init_browser()
 
             # Authenticate with Amazon if not already done
@@ -652,31 +649,48 @@ class AmazonWalmartAutomation:
         self.cleanup()
 
     def _init_browser(self) -> None:
-        """Initialize Playwright browser."""
-        logger.info("Initializing browser...")
+        """Initialize Playwright with persistent browser context.
+
+        Uses launch_persistent_context with real Chrome (not Chromium) and a
+        persistent profile directory. This accumulates cookies, localStorage,
+        and browsing history across sessions, making the browser look like a
+        real user to bot detection (PerimeterX/HUMAN).
+
+        Always runs non-headless. On the LXC, xvfb provides a virtual display.
+        On Windows, the browser window is positioned off-screen.
+        """
+        logger.info("Initializing browser with persistent profile...")
+        logger.info(f"Profile directory: {self.profile_dir}")
 
         self.playwright = sync_playwright().start()
 
-        # Launch browser with anti-detection measures
-        self.browser = self.playwright.chromium.launch(
-            headless=self.headless,
-            channel="chrome",  # Use Chrome instead of Chromium (more common)
+        # Use persistent context - cookies/sessions persist in the Chrome profile
+        self.context = self.playwright.chromium.launch_persistent_context(
+            user_data_dir=str(self.profile_dir),
+            headless=False,  # Always non-headless (use xvfb on LXC)
+            channel="chrome",  # Real Chrome, not Chromium (harder to fingerprint)
+            slow_mo=50,  # Slight delay between actions (more human-like)
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
                 "--disable-web-security",
                 "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-setuid-sandbox",
-                "--disable-accelerated-2d-canvas",
-                "--disable-gpu",
                 "--window-size=1920,1080",
-                "--start-maximized",
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+                "--window-position=-2000,-2000",  # Off-screen (hidden but not headless)
             ]
         )
 
-        logger.success(f"Browser launched (headless={self.headless})")
+        # Hide webdriver flag on all pages created in this context
+        self.context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
+
+        logger.success("Browser launched with persistent profile (non-headless)")
 
     def _restart_browser(self) -> None:
         """Restart browser to clear accumulated memory and renderer processes.
@@ -690,7 +704,7 @@ class AmazonWalmartAutomation:
         logger.info("Restarting browser to prevent memory leaks...")
 
         try:
-            # Close existing sessions
+            # Close existing auth page references
             if self.amazon_auth:
                 self.amazon_auth.close()
                 self.amazon_auth = None
@@ -698,10 +712,10 @@ class AmazonWalmartAutomation:
                 self.walmart_auth.close()
                 self.walmart_auth = None
 
-            # Close browser and playwright
-            if self.browser:
-                self.browser.close()
-                self.browser = None
+            # Close persistent context and playwright
+            if self.context:
+                self.context.close()
+                self.context = None
             if self.playwright:
                 self.playwright.stop()
                 self.playwright = None
@@ -736,7 +750,7 @@ class AmazonWalmartAutomation:
             Authenticated Playwright page
         """
         logger.info("Authenticating with Amazon...")
-        self.amazon_auth = AmazonAuthenticator(self.browser)
+        self.amazon_auth = AmazonAuthenticator(self.context)
         page = self.amazon_auth.authenticate()
         logger.success("Amazon authentication successful")
         return page
@@ -748,7 +762,7 @@ class AmazonWalmartAutomation:
             Authenticated Playwright page
         """
         logger.info("Authenticating with Walmart...")
-        self.walmart_auth = WalmartAuthenticator(self.browser)
+        self.walmart_auth = WalmartAuthenticator(self.context)
         page = self.walmart_auth.authenticate()
         logger.success("Walmart authentication successful")
         return page
@@ -844,8 +858,8 @@ class AmazonWalmartAutomation:
                 self.amazon_auth.close()
             if self.walmart_auth:
                 self.walmart_auth.close()
-            if self.browser:
-                self.browser.close()
+            if self.context:
+                self.context.close()
             if self.playwright:
                 self.playwright.stop()
 
@@ -865,9 +879,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python src/main.py                    # Run on schedule (random 3-5 min intervals)
+  python src/main.py                    # Run with continuous monitoring
   python src/main.py --once             # Run once and exit
-  python src/main.py --once --headed    # Run once with visible browser
         """
     )
 
@@ -877,19 +890,10 @@ Examples:
         help="Run once and exit (instead of running on schedule)"
     )
 
-    parser.add_argument(
-        "--headed",
-        action="store_true",
-        help="Show browser window (non-headless mode)"
-    )
-
     args = parser.parse_args()
 
-    # Determine headless setting (None = use config, False = show browser, True = hide browser)
-    headless = None if not args.headed else False
-
     # Initialize automation
-    automation = AmazonWalmartAutomation(headless=headless)
+    automation = AmazonWalmartAutomation()
 
     # Run once or on schedule
     if args.once:

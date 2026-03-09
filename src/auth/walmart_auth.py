@@ -1,29 +1,29 @@
 """Walmart authentication with email 2FA support."""
 
 import time
-from playwright.sync_api import Page, Browser, BrowserContext, TimeoutError
+from playwright.sync_api import Page, BrowserContext, TimeoutError
 from loguru import logger
 
 from ..config import settings
-from .session_manager import SessionManager
 
 
 class WalmartAuthenticator:
     """Handles Walmart authentication with email 2FA."""
 
-    def __init__(self, browser: Browser):
+    def __init__(self, context: BrowserContext):
         """Initialize Walmart authenticator.
 
         Args:
-            browser: Playwright browser instance
+            context: Playwright persistent browser context (shared)
         """
-        self.browser = browser
-        self.context: BrowserContext = None
+        self.context = context
         self.page: Page = None
-        self.session_manager = SessionManager(settings.walmart_cookies_file)
 
     def authenticate(self) -> Page:
         """Authenticate with Walmart and return logged-in page.
+
+        The persistent browser context handles cookie/session persistence
+        automatically through its profile directory.
 
         Returns:
             Playwright page with active Walmart session
@@ -31,32 +31,14 @@ class WalmartAuthenticator:
         Raises:
             Exception: If authentication fails
         """
-        # Create browser context
-        self.context = self.browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
-        )
         self.page = self.context.new_page()
 
-        # Hide webdriver flag
-        self.page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        """)
+        # Validate session (persistent profile may have valid cookies)
+        if self._validate_session():
+            logger.success("Existing Walmart session is valid!")
+            return self.page
 
-        # Try to load existing cookies
-        if self.session_manager.cookies_exist():
-            logger.info("Found existing Walmart cookies, attempting to use them")
-            self.session_manager.load_cookies(self.context)
-
-            # Validate session
-            if self._validate_session():
-                logger.success("Existing Walmart session is valid!")
-                return self.page
-
-            logger.warning("Existing session invalid, logging in again")
-            self.session_manager.clear_cookies()
+        logger.warning("No valid session, logging in...")
 
         # Perform fresh login
         self._login()
@@ -207,9 +189,6 @@ class WalmartAuthenticator:
                 logger.warning(f"Still on auth page: {current_url}")
                 # Give it more time
                 time.sleep(5)
-
-            # Save cookies for future use
-            self.session_manager.save_cookies(self.context)
 
             logger.success("Walmart login successful!")
 
@@ -479,12 +458,11 @@ class WalmartAuthenticator:
             logger.error(f"Failed to save screenshot: {e}")
 
     def close(self) -> None:
-        """Close browser context and page."""
+        """Close Walmart page (context is shared, not closed here)."""
         try:
             if self.page:
                 self.page.close()
-            if self.context:
-                self.context.close()
-            logger.info("Closed Walmart session")
+                self.page = None
+            logger.info("Closed Walmart page")
         except Exception as e:
-            logger.error(f"Error closing Walmart session: {e}")
+            logger.error(f"Error closing Walmart page: {e}")

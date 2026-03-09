@@ -2,29 +2,29 @@
 
 import time
 import pyotp
-from playwright.sync_api import Page, Browser, BrowserContext, TimeoutError
+from playwright.sync_api import Page, BrowserContext, TimeoutError
 from loguru import logger
 
 from ..config import settings
-from .session_manager import SessionManager
 
 
 class AmazonAuthenticator:
     """Handles Amazon authentication with OTP."""
 
-    def __init__(self, browser: Browser):
+    def __init__(self, context: BrowserContext):
         """Initialize Amazon authenticator.
 
         Args:
-            browser: Playwright browser instance
+            context: Playwright persistent browser context (shared)
         """
-        self.browser = browser
-        self.context: BrowserContext = None
+        self.context = context
         self.page: Page = None
-        self.session_manager = SessionManager(settings.amazon_cookies_file)
 
     def authenticate(self) -> Page:
         """Authenticate with Amazon and return logged-in page.
+
+        The persistent browser context handles cookie/session persistence
+        automatically through its profile directory.
 
         Returns:
             Playwright page with active Amazon session
@@ -32,29 +32,14 @@ class AmazonAuthenticator:
         Raises:
             Exception: If authentication fails
         """
-        # Create browser context
-        self.context = self.browser.new_context(
-            viewport={"width": 1280, "height": 720},
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        )
         self.page = self.context.new_page()
 
-        # Try to load existing cookies
-        if self.session_manager.cookies_exist():
-            logger.info("Found existing Amazon cookies, attempting to use them")
-            self.session_manager.load_cookies(self.context)
+        # Validate session (persistent profile may have valid cookies)
+        if self._validate_session():
+            logger.success("Existing Amazon session is valid!")
+            return self.page
 
-            # Validate session
-            if self._validate_session():
-                logger.success("Existing Amazon session is valid!")
-                return self.page
-
-            logger.warning("Existing session invalid, logging in again")
-            self.session_manager.clear_cookies()
+        logger.warning("No valid session, logging in...")
 
         # Perform fresh login
         self._login()
@@ -364,9 +349,6 @@ class AmazonAuthenticator:
             except Exception as e:
                 logger.warning(f"Could not verify shopping list container: {e}")
 
-            # Save cookies for future use
-            self.session_manager.save_cookies(self.context)
-
             logger.success("Amazon login successful and shopping list accessible!")
 
         except TimeoutError as e:
@@ -592,12 +574,11 @@ class AmazonAuthenticator:
             logger.error(f"Failed to save screenshot: {e}")
 
     def close(self) -> None:
-        """Close browser context and page."""
+        """Close Amazon page (context is shared, not closed here)."""
         try:
             if self.page:
                 self.page.close()
-            if self.context:
-                self.context.close()
-            logger.info("Closed Amazon session")
+                self.page = None
+            logger.info("Closed Amazon page")
         except Exception as e:
-            logger.error(f"Error closing Amazon session: {e}")
+            logger.error(f"Error closing Amazon page: {e}")

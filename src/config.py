@@ -88,10 +88,6 @@ class Settings(BaseSettings):
     )
 
     # Browser settings
-    browser_headless: bool = Field(
-        default=True,  # Set to True for production (headless). Use --headed flag or APP_BROWSER_HEADLESS=false for debugging
-        description="Run browser in headless mode"
-    )
     browser_timeout: int = Field(
         default=30000,
         description="Browser timeout in milliseconds"
@@ -103,20 +99,6 @@ class Settings(BaseSettings):
     gc_interval_minutes: int = Field(
         default=30,
         description="Minutes between garbage collection runs (memory leak prevention)"
-    )
-
-    # Session settings
-    cookies_dir: str = Field(
-        default="credentials",
-        description="Directory for storing session cookies"
-    )
-    amazon_cookies_file: str = Field(
-        default="credentials/amazon_cookies.json",
-        description="Amazon session cookies file"
-    )
-    walmart_cookies_file: str = Field(
-        default="credentials/walmart_cookies.json",
-        description="Walmart session cookies file"
     )
 
     # Walmart search settings
