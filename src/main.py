@@ -664,6 +664,21 @@ class AmazonWalmartAutomation:
 
         self.playwright = sync_playwright().start()
 
+        # Build browser args
+        browser_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-web-security",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--window-size=1920,1080",
+        ]
+
+        # On Linux (LXC with xvfb), hide window off-screen
+        # On Windows, keep it visible for debugging
+        if sys.platform != "win32":
+            browser_args.append("--window-position=-2000,-2000")
+
         # Use persistent context - cookies/sessions persist in the Chrome profile
         self.context = self.playwright.chromium.launch_persistent_context(
             user_data_dir=str(self.profile_dir),
@@ -672,15 +687,7 @@ class AmazonWalmartAutomation:
             slow_mo=50,  # Slight delay between actions (more human-like)
             viewport={"width": 1920, "height": 1080},
             locale="en-US",
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-web-security",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--window-size=1920,1080",
-                "--window-position=-2000,-2000",  # Off-screen (hidden but not headless)
-            ]
+            args=browser_args,
         )
 
         # Hide webdriver flag on all pages created in this context
