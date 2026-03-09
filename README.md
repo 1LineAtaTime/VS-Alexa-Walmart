@@ -50,6 +50,17 @@ cp credentials/credentials.py.example credentials/credentials.py
 # Edit credentials/credentials.py with your actual credentials
 ```
 
+### First-Time Walmart Login
+
+Before running the automation, you need to establish a Walmart session in the persistent browser profile:
+
+```bash
+# Opens Chrome so you can log into Walmart manually
+python manual_login.py
+```
+
+Log into Walmart in the browser that opens, then close it. The session is saved to the persistent profile and reused by the automation. Walmart may require 2FA on first login from a new browser.
+
 ### Usage
 
 **Run once (for testing):**
@@ -62,10 +73,7 @@ python src/main.py --once
 python src/main.py
 ```
 
-**Run with visible browser (for debugging):**
-```bash
-python src/main.py --once --headed
-```
+The browser always runs in non-headless mode (visible on Windows, virtual display via xvfb on Linux). This is required to bypass Walmart's PerimeterX bot detection.
 
 The continuous monitoring mode will:
 - Check for new items every 5 seconds
@@ -122,6 +130,14 @@ sudo apt --fix-broken install  # If needed
 rm google-chrome-stable_current_amd64.deb
 ```
 
+### Install xvfb (Required)
+
+The automation runs Chrome in non-headless mode with a virtual display to bypass bot detection:
+
+```bash
+sudo apt install -y xvfb
+```
+
 ### Systemd Service Setup
 
 For continuous operation, set up a systemd service:
@@ -129,11 +145,11 @@ For continuous operation, set up a systemd service:
 ⚠️ **Important**: The systemd service is configured to:
 - Run as **root user** (prevents permission issues with git pull)
 - Expect project location at `/home/VS-Alexa-Walmart`
+- Use `xvfb-run` for virtual display (non-headless Chrome for bot detection bypass)
 - Auto git pull on every service restart to stay updated
 
 ```bash
 # Ensure project is at the correct location
-# If not already there, move or clone to /home/VS-Alexa-Walmart
 cd /home
 git clone <repository-url> VS-Alexa-Walmart
 
@@ -146,6 +162,10 @@ chmod +x deployment/setup-systemd.sh
 # Run setup (installs and enables service)
 ./deployment/setup-systemd.sh
 
+# First-time: run once interactively to handle Walmart 2FA
+xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
+  .venv/bin/python src/main.py --once
+
 # Start the service
 sudo systemctl start amazon-walmart-automation
 
@@ -153,7 +173,7 @@ sudo systemctl start amazon-walmart-automation
 sudo journalctl -u amazon-walmart-automation -f
 ```
 
-See [deployment/SYSTEMD.md](deployment/SYSTEMD.md) for detailed service management.
+See [deployment/SYSTEMD.md](deployment/SYSTEMD.md) for detailed service management and first-time login instructions.
 
 ### Troubleshooting LXC
 
@@ -175,8 +195,8 @@ The automation is organized into 4 modules:
 
 ### Module 0: Authentication
 - Authenticates with Amazon using OTP/TOTP
-- Authenticates with Walmart using email 2FA
-- Persists sessions via cookies for faster subsequent runs
+- Authenticates with Walmart using email 2FA (only on first login from new browser)
+- Persists sessions via persistent Chrome browser profile (cookies, localStorage, history)
 
 ### Module 1: Amazon Scraping
 - Navigates to Amazon Alexa shopping list
@@ -226,10 +246,11 @@ The automation is organized into 4 modules:
 - Example: "Attention. I could not add milk to the Walmart cart"
 - Requires Alexa Media Player integration in Home Assistant
 
-### Persistent Browser Sessions
-- Keeps browser open between scheduled runs
-- Reduces authentication overhead
-- Saves resources by avoiding repeated browser launches
+### Persistent Browser Profile
+- Uses Chrome persistent profile (`credentials/.playwright_profile/`) to store cookies, localStorage, and session data
+- Bypasses Walmart's PerimeterX bot detection by appearing as a real returning browser
+- Keeps browser open between scheduled runs, reducing authentication overhead
+- Non-headless Chrome with xvfb virtual display on Linux for bot detection bypass
 
 ### Error Handling
 - Screenshots saved on errors
@@ -245,8 +266,7 @@ VS-Alexa-Walmart/
 │   ├── config.py            # Configuration & settings
 │   ├── auth/                # Module 0: Authentication
 │   │   ├── amazon_auth.py
-│   │   ├── walmart_auth.py
-│   │   └── session_manager.py
+│   │   └── walmart_auth.py
 │   ├── amazon/              # Module 1 & 2: Amazon operations
 │   │   ├── list_scraper.py
 │   │   └── list_clearer.py
@@ -261,7 +281,9 @@ VS-Alexa-Walmart/
 │   ├── setup-systemd.sh
 │   ├── amazon-walmart-automation.service
 │   └── SYSTEMD.md
+├── manual_login.py         # Helper to manually log into Walmart
 ├── credentials/             # Your credentials (gitignored)
+│   └── .playwright_profile/ # Persistent Chrome profile (gitignored, auto-created)
 ├── logs/                    # Log files & screenshots (auto-generated)
 ├── requirements.txt
 ├── README.md
@@ -324,7 +346,6 @@ If configured correctly, when items fail to add to the Walmart cart, your Echo w
 All settings can be overridden with `APP_` prefix:
 
 ```bash
-APP_BROWSER_HEADLESS=false              # Show browser (default: true)
 APP_MIN_MATCH_SCORE=70                  # Fuzzy match threshold (default: 70)
 APP_MONITOR_INTERVAL_SECONDS=5          # Check interval (default: 5)
 APP_SCHEDULE_INTERVAL_MIN_MINUTES=10    # Min refresh interval (default: 10)
@@ -335,6 +356,24 @@ APP_SEARCH_FALLBACK_MAX_ITEMS=10        # Max items to try from search (default:
 ## Troubleshooting
 
 ### Authentication Issues
+
+**Walmart 2FA fails (EOFError) when running as service:**
+
+The systemd service has no stdin, so `input()` for 2FA codes fails. This only happens on first login from a new browser. Fix:
+```bash
+# Stop service and run interactively
+sudo systemctl stop amazon-walmart-automation
+cd /home/VS-Alexa-Walmart
+xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
+  .venv/bin/python src/main.py --once
+# Enter 2FA code when prompted, then restart service
+sudo systemctl start amazon-walmart-automation
+```
+
+Alternatively, copy a working profile from your Windows machine:
+```bash
+scp -r credentials/.playwright_profile root@<LXC-IP>:/home/VS-Alexa-Walmart/credentials/.playwright_profile
+```
 
 **Amazon authentication fails - Button click not working:**
 
@@ -347,16 +386,10 @@ This indicates Amazon's bot detection is blocking the form submission. The code 
 
 **Solution:**
 ```bash
-# 1. Delete old cookies
-rm credentials/*_cookies.json
-
-# 2. Verify the fix is in place
-# Check that amazon_auth.py uses form.submit() method (already fixed)
-
-# 3. Test authentication
+# 1. Test authentication
 python src/main.py --once
 
-# 4. Check logs for these success indicators:
+# 2. Check logs for these success indicators:
 # - "Method 3: Submitting form directly with JavaScript..."
 # - "OTP page detected by URL"
 # - "OTP verification required"
@@ -402,4 +435,4 @@ MIT License - see LICENSE file
 - All credentials stored locally only
 - Cookies are browser-encrypted at rest
 - No external data transmission except to Amazon/Walmart
-- Never commit `credentials/credentials.py` or `*_cookies.json`
+- Never commit `credentials/credentials.py` or the `.playwright_profile/` directory

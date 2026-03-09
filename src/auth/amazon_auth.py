@@ -32,7 +32,12 @@ class AmazonAuthenticator:
         Raises:
             Exception: If authentication fails
         """
-        self.page = self.context.new_page()
+        # Reuse the blank page that launch_persistent_context creates,
+        # or create a new one if none exist
+        if self.context.pages:
+            self.page = self.context.pages[0]
+        else:
+            self.page = self.context.new_page()
 
         # Validate session (persistent profile may have valid cookies)
         if self._validate_session():

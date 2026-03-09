@@ -9,12 +9,17 @@ Type=simple
 User=root
 WorkingDirectory=/home/VS-Alexa-Walmart
 Environment="PATH=/home/VS-Alexa-Walmart/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="DISPLAY=:99"
 ExecStartPre=/usr/bin/git -C /home/VS-Alexa-Walmart pull
-ExecStart=/home/VS-Alexa-Walmart/.venv/bin/python src/main.py
+# xvfb-run provides a virtual display for non-headless Chrome (required for PerimeterX bypass)
+ExecStart=/usr/bin/xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' /home/VS-Alexa-Walmart/.venv/bin/python src/main.py
 
 # Restart policy
 Restart=always
 RestartSec=10
+
+# Memory limit to prevent runaway browser processes
+MemoryMax=2G
 
 # Logging
 StandardOutput=journal

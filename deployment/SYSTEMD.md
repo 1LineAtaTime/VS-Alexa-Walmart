@@ -21,6 +21,14 @@ Since the automation now runs continuously (checking every 5 seconds), you shoul
 - ✅ Better resource management
 - ✅ Auto git pull on every restart to stay updated
 
+## Prerequisites
+
+- **xvfb** must be installed (provides virtual display for non-headless Chrome):
+  ```bash
+  sudo apt install -y xvfb
+  ```
+- **Google Chrome** (not Chromium) must be installed for PerimeterX bypass
+
 ## Quick Setup (Recommended)
 
 1. **Ensure the project is located at `/home/VS-Alexa-Walmart`:**
@@ -47,17 +55,65 @@ Since the automation now runs continuously (checking every 5 seconds), you shoul
    ./deployment/setup-systemd.sh
    ```
 
-5. **Start the service:**
+5. **First-time setup — establish Walmart session (see below)**
+
+6. **Start the service:**
    ```bash
    sudo systemctl start amazon-walmart-automation
    ```
 
-6. **Check status:**
+7. **Check status:**
    ```bash
    sudo systemctl status amazon-walmart-automation
    ```
 
 That's it! The service is now running and will start automatically on boot.
+
+## First-Time Walmart Login
+
+The automation uses a **persistent Chrome browser profile** to maintain login sessions and bypass bot detection (PerimeterX). On first run, Walmart will require 2FA which needs interactive input.
+
+### Option A: Run once interactively (recommended)
+
+Stop the service and run the automation once interactively so you can enter the 2FA code:
+
+```bash
+# Stop the service if running
+sudo systemctl stop amazon-walmart-automation
+
+# Run once interactively with xvfb
+cd /home/VS-Alexa-Walmart
+xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
+  .venv/bin/python src/main.py --once
+```
+
+When prompted, enter the 6-digit 2FA code from your email. After successful login, the persistent profile will remember the session and 2FA won't be needed again.
+
+Then restart the service:
+```bash
+sudo systemctl start amazon-walmart-automation
+```
+
+### Option B: Copy profile from Windows
+
+If you've already logged into Walmart on your Windows machine using `manual_login.py`, copy the persistent profile to the LXC:
+
+```bash
+# From your Windows machine (Git Bash or PowerShell with SSH)
+scp -r credentials/.playwright_profile root@<LXC-IP>:/home/VS-Alexa-Walmart/credentials/.playwright_profile
+```
+
+### Option C: Manual login script
+
+Run the manual login helper (opens a browser for you to log in manually):
+
+```bash
+cd /home/VS-Alexa-Walmart
+xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
+  .venv/bin/python manual_login.py
+```
+
+Note: On a headless LXC this won't show a visible browser. Use Option A or B instead.
 
 ## Manual Setup (Alternative)
 
@@ -172,17 +228,17 @@ Then restart:
 sudo systemctl restart amazon-walmart-automation
 ```
 
-### Run in Headed Mode (for debugging)
+### Run Once Interactively (for testing/debugging)
 
+Stop the service and run a single pass:
 ```bash
-sudo systemctl edit amazon-walmart-automation
+sudo systemctl stop amazon-walmart-automation
+cd /home/VS-Alexa-Walmart
+xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
+  .venv/bin/python src/main.py --once
 ```
 
-Add:
-```ini
-[Service]
-Environment="APP_BROWSER_HEADLESS=false"
-```
+The `--once` flag runs a single check cycle and exits instead of continuous monitoring.
 
 ## Troubleshooting
 
