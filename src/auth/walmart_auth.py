@@ -339,16 +339,22 @@ class WalmartAuthenticator:
             if self.page.locator("text='Robot or human?'").count() > 0:
                 logger.info("Bot detection challenge detected! Handling Press & Hold...")
 
-                # Find all buttons on the page and select the first visible one
-                all_buttons = self.page.locator("button").all()
-                logger.info(f"Found {len(all_buttons)} buttons on page")
-
+                # The "PRESS & HOLD" element is NOT a <button> - it's a custom element
+                # Try multiple selectors to find it
                 btn_locator = None
-                for btn in all_buttons:
+                press_hold_selectors = [
+                    "text='PRESS & HOLD'",
+                    "text='Press & Hold'",
+                    "[aria-label*='hold' i]",
+                    "button",
+                ]
+
+                for selector in press_hold_selectors:
                     try:
-                        if btn.is_visible(timeout=1000):
-                            btn_locator = btn
-                            logger.info("Found visible Press & Hold button")
+                        element = self.page.locator(selector).first
+                        if element.count() > 0 and element.is_visible(timeout=2000):
+                            btn_locator = element
+                            logger.info(f"Found Press & Hold element with selector: {selector}")
                             break
                     except Exception:
                         continue
@@ -362,18 +368,27 @@ class WalmartAuthenticator:
                         # Move mouse to button
                         self.page.mouse.move(x, y)
 
-                        # Press and hold for 5 seconds
+                        # Press and hold for 10 seconds (longer to be safe)
                         self.page.mouse.down()
-                        logger.info("Holding button for 5 seconds...")
-                        time.sleep(5)
+                        logger.info("Holding button for 10 seconds...")
+                        time.sleep(10)
                         self.page.mouse.up()
 
                         logger.success("Released button, waiting for verification")
                         time.sleep(5)
 
-                        logger.success("Bot detection challenge passed")
+                        # Check if challenge is still present
+                        if self.page.locator("text='Robot or human?'").count() > 0:
+                            logger.warning("Bot detection challenge still present after first attempt, retrying...")
+                            self.page.mouse.move(x, y)
+                            self.page.mouse.down()
+                            time.sleep(12)
+                            self.page.mouse.up()
+                            time.sleep(5)
+
+                        logger.success("Bot detection challenge handled")
                 else:
-                    logger.error("Could not find Press & Hold button!")
+                    logger.error("Could not find Press & Hold element!")
                     self._save_screenshot("walmart_no_press_hold_button")
         except Exception as e:
             logger.debug(f"No bot detection to handle or error: {e}")

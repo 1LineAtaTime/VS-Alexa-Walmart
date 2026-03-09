@@ -681,27 +681,45 @@ class WalmartProductSearch:
             if robot_check_text.count() > 0 and robot_check_text.is_visible(timeout=2000):
                 logger.info("Bot detection challenge detected! Handling Press & Hold...")
 
-                # Find the Press & Hold button
-                btn_locator = self.page.locator("button").first
-                if btn_locator.count() > 0 and btn_locator.is_visible(timeout=2000):
+                # The "PRESS & HOLD" element is NOT a <button> - it's a custom element
+                btn_locator = None
+                press_hold_selectors = [
+                    "text='PRESS & HOLD'",
+                    "text='Press & Hold'",
+                    "[aria-label*='hold' i]",
+                    "button",
+                ]
+
+                for selector in press_hold_selectors:
+                    try:
+                        element = self.page.locator(selector).first
+                        if element.count() > 0 and element.is_visible(timeout=2000):
+                            btn_locator = element
+                            logger.info(f"Found Press & Hold element with selector: {selector}")
+                            break
+                    except Exception:
+                        continue
+
+                if btn_locator:
                     box = btn_locator.bounding_box()
                     if box:
                         x = box['x'] + box['width'] / 2
                         y = box['y'] + box['height'] / 2
 
-                        # Move mouse to button
                         self.page.mouse.move(x, y)
 
-                        # Press and hold for 5 seconds
                         self.page.mouse.down()
-                        logger.info("Holding button for 5 seconds...")
-                        time.sleep(5)
+                        logger.info("Holding button for 10 seconds...")
+                        time.sleep(10)
                         self.page.mouse.up()
 
                         logger.success("Released button, waiting for verification")
                         time.sleep(5)
 
-                        logger.success("Bot detection challenge passed")
+                        logger.success("Bot detection challenge handled")
+                else:
+                    logger.error("Could not find Press & Hold element!")
+                    self._save_screenshot("walmart_no_press_hold_button")
         except Exception as e:
             logger.debug(f"No bot detection to handle or error: {e}")
 
