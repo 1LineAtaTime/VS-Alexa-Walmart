@@ -59,6 +59,17 @@ Before running the automation, you need to establish a Walmart session in the pe
 python manual_login.py
 ```
 
+or in the LXC...
+
+```bash
+systemctl stop amazon-walmart-automation
+cd /home/VS-Alexa-Walmart
+xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
+  .venv/bin/python src/main.py --once
+# Enter 2FA code when prompted
+systemctl start amazon-walmart-automation
+```
+
 Log into Walmart in the browser that opens, then close it. The session is saved to the persistent profile and reused by the automation. Walmart may require 2FA on first login from a new browser.
 
 ### Usage
