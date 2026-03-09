@@ -123,18 +123,32 @@ class AmazonAuthenticator:
 
             logger.info("On Amazon sign-in page")
 
-            # Enter email
-            logger.info("Entering email...")
-            email_input = self.page.wait_for_selector("#ap_email, input[type='email']", timeout=10000)
-            email_input.fill(settings.amazon_email)
+            # Check if Amazon already knows the user (password-only page)
+            # This happens when Amazon remembers the account from its own storage
+            password_already_visible = False
+            try:
+                password_field = self.page.locator("#ap_password")
+                if password_field.is_visible(timeout=2000):
+                    logger.info("Password field already visible - Amazon remembers the account")
+                    password_already_visible = True
+            except Exception:
+                pass
 
-            # Click Continue - use .first to handle multiple matches
-            continue_button = self.page.locator("#continue").first
-            continue_button.click()
-            logger.info("Clicked Continue")
+            if not password_already_visible:
+                # Enter email
+                logger.info("Entering email...")
+                email_input = self.page.wait_for_selector("#ap_email, input[type='email']", timeout=10000)
+                email_input.fill(settings.amazon_email)
 
-            # Wait for password field
-            time.sleep(1)
+                # Click Continue - use .first to handle multiple matches
+                continue_button = self.page.locator("#continue").first
+                continue_button.click()
+                logger.info("Clicked Continue")
+
+                # Wait for password field
+                time.sleep(1)
+            else:
+                logger.info("Skipping email entry (account already recognized)")
 
             # Enter password
             logger.info("Entering password...")
@@ -222,10 +236,10 @@ class AmazonAuthenticator:
             try:
                 # Wait for either URL change OR disappearance of password field
                 self.page.wait_for_function(
-                    """() => {
+                    """(initialUrl) => {
                         const url = window.location.href;
                         const passwordField = document.querySelector('#ap_password');
-                        return url !== arguments[0] || (passwordField && !passwordField.offsetParent);
+                        return url !== initialUrl || (passwordField && !passwordField.offsetParent);
                     }""",
                     arg=initial_url,
                     timeout=10000

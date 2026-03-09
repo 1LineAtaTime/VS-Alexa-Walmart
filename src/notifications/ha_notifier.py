@@ -73,6 +73,38 @@ class HomeAssistantNotifier:
             logger.error(f"Error sending Home Assistant notification: {e}")
             return False
 
+    def notify_critical_failure(self, error_message: str) -> bool:
+        """Send notification about a critical automation failure (login, search, etc.).
+
+        Args:
+            error_message: The error message describing the failure
+
+        Returns:
+            True if notification was sent successfully
+        """
+        if not self.enabled:
+            logger.debug("Home Assistant notifications not configured, skipping")
+            return False
+
+        try:
+            # Keep it short for TTS - truncate long error messages
+            short_error = error_message[:100] if len(error_message) > 100 else error_message
+            message = f"Attention. The Walmart shopping automation has failed. {short_error}"
+
+            logger.info(f"Sending critical failure notification: {message}")
+            success = self._send_tts_announcement(message)
+
+            if success:
+                logger.success("Critical failure notification sent via Home Assistant")
+            else:
+                logger.warning("Failed to send critical failure notification")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error sending critical failure notification: {e}")
+            return False
+
     def _send_tts_announcement(self, message: str) -> bool:
         """Send TTS announcement via Home Assistant REST API.
 

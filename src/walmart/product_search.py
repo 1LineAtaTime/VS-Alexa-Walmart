@@ -148,14 +148,22 @@ class WalmartProductSearch:
                     if not item_id:
                         item_id = href.split("/")[-1].split("?")[0]
 
-                    # Extract name from the link (it contains the span.w_iUH7)
+                    # Extract name from the card using multiple fallback selectors
                     name = ""
-                    try:
-                        name_span = link.locator("span.w_iUH7").first
-                        if name_span.count() > 0:
-                            name = name_span.inner_text(timeout=1000).strip()
-                    except Exception:
-                        pass
+                    name_selectors = [
+                        "h3[data-automation-id='product-title']",
+                        "[data-automation-id='product-title']",
+                        "span.w_iUH7",
+                    ]
+                    for name_sel in name_selectors:
+                        try:
+                            name_elem = card.locator(name_sel).first
+                            if name_elem.count() > 0:
+                                name = name_elem.inner_text(timeout=1000).strip()
+                                if name:
+                                    break
+                        except Exception:
+                            continue
 
                     # Log every product we find for debugging
                     logger.debug(f"Card #{card_index+1}: Found product '{name}' (ID: {item_id})")

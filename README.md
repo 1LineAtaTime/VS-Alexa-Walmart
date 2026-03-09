@@ -64,7 +64,7 @@ python src/main.py
 
 **Run with visible browser (for debugging):**
 ```bash
-APP_BROWSER_HEADLESS=false python src/main.py --once
+python src/main.py --once --headed
 ```
 
 The continuous monitoring mode will:

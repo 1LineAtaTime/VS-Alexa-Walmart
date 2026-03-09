@@ -512,6 +512,14 @@ class AmazonWalmartAutomation:
 
         except Exception as e:
             logger.error(f"Automation failed: {e}", exc_info=True)
+
+            # Send HA notification for critical failures (login, search, etc.)
+            try:
+                notifier = HomeAssistantNotifier()
+                notifier.notify_critical_failure(str(e))
+            except Exception as notify_err:
+                logger.warning(f"Failed to send critical failure notification: {notify_err}")
+
             return False
 
     def run_scheduled(self) -> None:
