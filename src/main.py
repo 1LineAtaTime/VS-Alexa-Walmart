@@ -51,6 +51,9 @@ class AmazonWalmartAutomation:
         # Track whether we've done initial Walmart authentication
         self.walmart_initially_authenticated = False
 
+        # Track items that failed all fallbacks (skip on future scrapes until browser restart)
+        self.skipped_items: set[str] = set()
+
         # Persistent browser profile directory
         self.profile_dir = Path("credentials/.playwright_profile")
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -99,6 +102,17 @@ class AmazonWalmartAutomation:
             amazon_scraper = AmazonListScraper(self.amazon_page)
             items = amazon_scraper.scrape_list()
 
+            # Filter out items that previously failed all fallbacks (still on Amazon list)
+            if items and self.skipped_items:
+                new_items = [item for item in items if item['name'].lower().strip() not in self.skipped_items]
+                skipped_count = len(items) - len(new_items)
+                if skipped_count > 0:
+                    logger.info(f"Skipping {skipped_count} previously failed item(s) still on Amazon list")
+                    for item in items:
+                        if item['name'].lower().strip() in self.skipped_items:
+                            logger.debug(f"  Skipping: {item['name']}")
+                items = new_items
+
             if not items:
                 logger.info("No items in Amazon shopping list.")
 
@@ -135,16 +149,6 @@ class AmazonWalmartAutomation:
             txt_file = self._save_items_to_file(items)
             logger.success(f"Items saved to: {txt_file}")
 
-            # Clear Amazon shopping list immediately
-            logger.info("\n" + "="*70)
-            logger.info("STEP 4: CLEARING AMAZON SHOPPING LIST")
-            logger.info("="*70)
-            amazon_clearer = AmazonListClearer(self.amazon_page)
-            if amazon_clearer.clear_list():
-                logger.success("Amazon shopping list cleared successfully")
-            else:
-                logger.warning("Failed to fully clear Amazon shopping list")
-
             # Check if we should skip Walmart and stop here
             skip_walmart = os.getenv("SKIP_WALMART", "false").lower() == "true"
 
@@ -155,16 +159,8 @@ class AmazonWalmartAutomation:
                 logger.info("Amazon workflow completed successfully!")
                 logger.info(f"  - Scraped {len(items)} items from Alexa Shopping List")
                 logger.info(f"  - Saved items to: {txt_file}")
-                logger.info("  - Cleared Amazon list")
+                logger.info("  - Items NOT cleared from Amazon list (Walmart skipped)")
                 logger.info("="*70)
-
-                # Delete the .txt file since we're done
-                if txt_file and Path(txt_file).exists():
-                    try:
-                        Path(txt_file).unlink()
-                        logger.success(f"Deleted shopping list file: {txt_file}")
-                    except Exception as e:
-                        logger.warning(f"Failed to delete shopping list file: {e}")
 
                 logger.success("AUTOMATION COMPLETED!")
                 logger.info("="*70 + "\n")
@@ -172,7 +168,7 @@ class AmazonWalmartAutomation:
 
             # Process each item from the saved file
             logger.info("\n" + "="*70)
-            logger.info("STEP 5: WALMART AUTHENTICATION & ADDING ITEMS TO CART")
+            logger.info("STEP 4: WALMART AUTHENTICATION & ADDING ITEMS TO CART")
             logger.info("="*70)
 
             # Authenticate with Walmart now that we have items to process
@@ -463,7 +459,7 @@ class AmazonWalmartAutomation:
             logger.info(f"Failed to add: {len(failed_items)}")
 
             if failed_items:
-                logger.warning("Failed items:")
+                logger.warning("Failed items (will remain on Amazon list):")
                 for item in failed_items:
                     logger.warning(f"  - {item['name']}")
 
@@ -474,6 +470,30 @@ class AmazonWalmartAutomation:
                     notifier.notify_failed_items(failed_items)
                 except Exception as e:
                     logger.warning(f"Failed to send notification: {e}")
+
+            # Clear only successfully added items from Amazon shopping list
+            if successfully_added:
+                logger.info("\n" + "="*70)
+                logger.info("STEP 5: CLEARING SUCCESSFUL ITEMS FROM AMAZON LIST")
+                logger.info("="*70)
+                logger.info(f"Clearing {len(successfully_added)} successfully added items from Amazon list...")
+                logger.info(f"Keeping {len(failed_items)} failed items on the list")
+
+                amazon_clearer = AmazonListClearer(self.amazon_page)
+                clear_result = amazon_clearer.clear_items_by_name(
+                    [item['name'] for item in successfully_added]
+                )
+
+                if clear_result["cleared"]:
+                    logger.success(f"Cleared {len(clear_result['cleared'])} items from Amazon list")
+                if clear_result["not_found"]:
+                    logger.warning(f"Could not clear {len(clear_result['not_found'])} items: {clear_result['not_found']}")
+
+            # Track failed items so they are skipped on future monitoring loops
+            if failed_items:
+                for item in failed_items:
+                    self.skipped_items.add(item['name'].lower().strip())
+                logger.info(f"Added {len(failed_items)} item(s) to skip list (total skipped: {len(self.skipped_items)})")
 
             logger.info("="*70)
             logger.success("AUTOMATION COMPLETED!")
@@ -615,6 +635,10 @@ class AmazonWalmartAutomation:
                 # Quick check for items using REUSED scraper instance
                 items = amazon_scraper.scrape_list()
 
+                # Filter out previously failed items that are still on the Amazon list
+                if items and self.skipped_items:
+                    items = [item for item in items if item['name'].lower().strip() not in self.skipped_items]
+
                 if items:
                     logger.info("\n" + "="*70)
                     logger.info(f"FOUND {len(items)} NEW ITEMS!")
@@ -709,6 +733,11 @@ class AmazonWalmartAutomation:
         - Re-authenticates with Amazon
         """
         logger.info("Restarting browser to prevent memory leaks...")
+
+        # Clear skipped items on restart so they get retried
+        if self.skipped_items:
+            logger.info(f"Clearing skip list ({len(self.skipped_items)} items) - will retry on next scrape")
+            self.skipped_items.clear()
 
         try:
             # Close existing auth page references

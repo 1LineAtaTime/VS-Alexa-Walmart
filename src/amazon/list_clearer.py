@@ -122,6 +122,148 @@ class AmazonListClearer:
             self._save_screenshot("amazon_clear_error")
             raise Exception(f"Amazon list clearing failed: {e}")
 
+    def clear_items_by_name(self, item_names: list[str]) -> dict:
+        """Clear only specific items from Amazon shopping list by matching their name.
+
+        Args:
+            item_names: List of item name strings to delete (case-insensitive match)
+
+        Returns:
+            Dict with 'cleared' (list of names cleared) and 'not_found' (list of names not found)
+        """
+        logger.info(f"Clearing {len(item_names)} specific items from Amazon shopping list")
+
+        result = {"cleared": [], "not_found": list(item_names)}
+
+        try:
+            # Navigate to shopping list
+            self.page.goto(settings.amazon_list_url, wait_until="domcontentloaded")
+            time.sleep(3)
+
+            # Build a lowercase set of names we want to delete
+            names_to_clear = {name.lower().strip() for name in item_names}
+            cleared_names = set()
+
+            # Find all Delete buttons and check each row's item name
+            delete_buttons = self.page.locator("button:has-text('Delete')").all()
+            logger.info(f"Found {len(delete_buttons)} items on the list, looking for {len(names_to_clear)} to clear")
+
+            # We need to process buttons carefully since DOM shifts after each deletion.
+            # Collect all item names first, then delete from bottom to top to avoid index shifts.
+            items_to_delete = []
+
+            for index, delete_btn in enumerate(delete_buttons):
+                try:
+                    item_name = delete_btn.evaluate("""
+                        (button) => {
+                            let current = button;
+                            for (let i = 0; i < 10; i++) {
+                                if (!current) return '';
+                                current = current.parentElement;
+                                if (!current) return '';
+
+                                let editBtn = current.querySelector('button:not([aria-hidden])');
+                                if (editBtn && editBtn.textContent.includes('Edit')) {
+                                    let fullText = current.innerText || current.textContent || '';
+                                    let lines = fullText.split('\\n').map(l => l.trim()).filter(l => l);
+
+                                    for (let line of lines) {
+                                        if (line === 'Edit' || line === 'Delete' ||
+                                            line.includes('Show search') ||
+                                            line.includes('Added') || line.includes('Edited') ||
+                                            line.includes('ago')) {
+                                            continue;
+                                        }
+                                        if (line.length > 2 && line.length < 100) {
+                                            return line;
+                                        }
+                                    }
+                                }
+                            }
+                            return '';
+                        }
+                    """)
+
+                    if item_name and item_name.strip().lower() in names_to_clear:
+                        items_to_delete.append((index, item_name.strip()))
+
+                except Exception as e:
+                    logger.warning(f"Error reading item at index {index}: {e}")
+                    continue
+
+            # Delete from bottom to top so DOM index shifts don't affect earlier items
+            items_to_delete.reverse()
+
+            for original_index, item_name in items_to_delete:
+                try:
+                    # Re-fetch buttons each time since DOM changes after deletion
+                    current_buttons = self.page.locator("button:has-text('Delete')").all()
+
+                    # Find the button for this item by re-scanning (positions shift)
+                    deleted = False
+                    for btn in current_buttons:
+                        try:
+                            btn_item_name = btn.evaluate("""
+                                (button) => {
+                                    let current = button;
+                                    for (let i = 0; i < 10; i++) {
+                                        if (!current) return '';
+                                        current = current.parentElement;
+                                        if (!current) return '';
+
+                                        let editBtn = current.querySelector('button:not([aria-hidden])');
+                                        if (editBtn && editBtn.textContent.includes('Edit')) {
+                                            let fullText = current.innerText || current.textContent || '';
+                                            let lines = fullText.split('\\n').map(l => l.trim()).filter(l => l);
+
+                                            for (let line of lines) {
+                                                if (line === 'Edit' || line === 'Delete' ||
+                                                    line.includes('Show search') ||
+                                                    line.includes('Added') || line.includes('Edited') ||
+                                                    line.includes('ago')) {
+                                                    continue;
+                                                }
+                                                if (line.length > 2 && line.length < 100) {
+                                                    return line;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    return '';
+                                }
+                            """)
+
+                            if btn_item_name and btn_item_name.strip().lower() == item_name.lower():
+                                logger.info(f"Deleting '{item_name}'...")
+                                btn.click()
+                                time.sleep(2)
+                                cleared_names.add(item_name.lower())
+                                deleted = True
+                                break
+
+                        except Exception:
+                            continue
+
+                    if not deleted:
+                        logger.warning(f"Could not find Delete button for '{item_name}' (may already be deleted)")
+
+                except Exception as e:
+                    logger.warning(f"Error deleting '{item_name}': {e}")
+
+            result["cleared"] = [name for name in item_names if name.lower().strip() in cleared_names]
+            result["not_found"] = [name for name in item_names if name.lower().strip() not in cleared_names]
+
+            logger.info(f"Cleared {len(result['cleared'])}/{len(item_names)} items")
+            if result["not_found"]:
+                logger.warning(f"Could not find/clear: {result['not_found']}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to clear specific items: {e}")
+            self._save_screenshot("amazon_clear_specific_error")
+            return result
+
     def clear_completed_items(self) -> int:
         """Clear only completed/checked items from the list.
 
