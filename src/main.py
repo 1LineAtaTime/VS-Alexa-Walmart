@@ -54,6 +54,10 @@ class AmazonWalmartAutomation:
         # Track items that failed all fallbacks (skip on future scrapes until browser restart)
         self.skipped_items: set[str] = set()
 
+        # Rate-limit HA notifications: only send once per failure cycle.
+        # Resets after a successful cart addition.
+        self._notification_sent = False
+
         # Persistent browser profile directory
         self.profile_dir = Path("credentials/.playwright_profile")
         self.profile_dir.mkdir(parents=True, exist_ok=True)
@@ -463,13 +467,21 @@ class AmazonWalmartAutomation:
                 for item in failed_items:
                     logger.warning(f"  - {item['name']}")
 
-                # Send notification via Home Assistant Alexa
-                logger.info("\nSending notification for failed items...")
-                try:
-                    notifier = HomeAssistantNotifier()
-                    notifier.notify_failed_items(failed_items)
-                except Exception as e:
-                    logger.warning(f"Failed to send notification: {e}")
+                # Send notification via Home Assistant Alexa (once per failure cycle)
+                if not self._notification_sent:
+                    logger.info("\nSending notification for failed items...")
+                    try:
+                        notifier = HomeAssistantNotifier()
+                        notifier.notify_failed_items(failed_items)
+                        self._notification_sent = True
+                    except Exception as e:
+                        logger.warning(f"Failed to send notification: {e}")
+                else:
+                    logger.info("Notification already sent for this failure cycle, skipping")
+
+            # Reset notification gate after successful additions
+            if successfully_added:
+                self._notification_sent = False
 
             # Clear only successfully added items from Amazon shopping list
             if successfully_added:
@@ -530,12 +542,16 @@ class AmazonWalmartAutomation:
         except Exception as e:
             logger.error(f"Automation failed: {e}", exc_info=True)
 
-            # Send HA notification for critical failures (login, search, etc.)
-            try:
-                notifier = HomeAssistantNotifier()
-                notifier.notify_critical_failure(str(e))
-            except Exception as notify_err:
-                logger.warning(f"Failed to send critical failure notification: {notify_err}")
+            # Send HA notification for critical failures (once per failure cycle)
+            if not self._notification_sent:
+                try:
+                    notifier = HomeAssistantNotifier()
+                    notifier.notify_critical_failure(str(e))
+                    self._notification_sent = True
+                except Exception as notify_err:
+                    logger.warning(f"Failed to send critical failure notification: {notify_err}")
+            else:
+                logger.info("Notification already sent for this failure cycle, skipping")
 
             return False
 
@@ -734,10 +750,11 @@ class AmazonWalmartAutomation:
         """
         logger.info("Restarting browser to prevent memory leaks...")
 
-        # Clear skipped items on restart so they get retried
+        # Clear skipped items and notification gate on restart so they get retried
         if self.skipped_items:
             logger.info(f"Clearing skip list ({len(self.skipped_items)} items) - will retry on next scrape")
             self.skipped_items.clear()
+        self._notification_sent = False
 
         try:
             # Close existing auth page references
