@@ -14,7 +14,7 @@ from datetime import datetime
 # Add parent directory to path so we can import src modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from playwright.sync_api import sync_playwright, BrowserContext, Page, TimeoutError
+from patchright.sync_api import sync_playwright, BrowserContext, Page, TimeoutError
 from loguru import logger
 
 from src.config import settings
@@ -730,11 +730,47 @@ class AmazonWalmartAutomation:
             args=browser_args,
         )
 
-        # Hide webdriver flag on all pages created in this context
+        # Anti-fingerprint init script for all pages in this context
         self.context.add_init_script("""
+            // Hide webdriver flag
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
             });
+
+            // Spoof WebGL renderer to match host GPU (Intel Iris 540)
+            const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function(param) {
+                if (param === 37445) return 'Intel Inc.';  // UNMASKED_VENDOR_WEBGL
+                if (param === 37446) return 'Intel(R) Iris(TM) Graphics 540';  // UNMASKED_RENDERER_WEBGL
+                return originalGetParameter.call(this, param);
+            };
+            const originalGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
+            WebGL2RenderingContext.prototype.getParameter = function(param) {
+                if (param === 37445) return 'Intel Inc.';
+                if (param === 37446) return 'Intel(R) Iris(TM) Graphics 540';
+                return originalGetParameter2.call(this, param);
+            };
+
+            // Spoof plugins to look like a real browser
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => {
+                    const plugins = [
+                        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+                    ];
+                    plugins.length = 3;
+                    return plugins;
+                }
+            });
+
+            // Fix outerHeight/outerWidth to include window chrome (xvfb has none)
+            if (window.outerHeight === window.innerHeight) {
+                Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 85 });
+            }
+            if (window.outerWidth === window.innerWidth) {
+                Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth + 15 });
+            }
         """)
 
         logger.success("Browser launched with persistent profile (non-headless)")
