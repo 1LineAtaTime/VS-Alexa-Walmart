@@ -589,11 +589,11 @@ class WalmartProductSearch:
         try:
             # Scroll down in increments
             for _ in range(3):
-                self.page.evaluate("window.scrollBy(0, 1000)")
+                self.page.evaluate("mw:window.scrollBy(0, 1000)")
                 time.sleep(0.5)
 
             # Scroll back to top
-            self.page.evaluate("window.scrollTo(0, 0)")
+            self.page.evaluate("mw:window.scrollTo(0, 0)")
             time.sleep(0.5)
 
         except Exception as e:

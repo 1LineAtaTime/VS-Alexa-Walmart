@@ -200,7 +200,7 @@ class AmazonAuthenticator:
                     # Method 3: Submit the form directly (bypasses button)
                     try:
                         logger.info("Method 3: Submitting form directly with JavaScript...")
-                        self.page.evaluate("document.querySelector('form[name=\"signIn\"]').submit()")
+                        self.page.evaluate("mw:document.querySelector('form[name=\"signIn\"]').submit()")
                         logger.info("Form submitted with JavaScript")
                         time.sleep(4)  # Wait for navigation
                     except Exception as e3:

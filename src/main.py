@@ -14,7 +14,8 @@ from datetime import datetime
 # Add parent directory to path so we can import src modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from patchright.sync_api import sync_playwright, BrowserContext, Page, TimeoutError
+from playwright.sync_api import BrowserContext, Page, TimeoutError
+from camoufox.sync_api import Camoufox
 from loguru import logger
 
 from src.config import settings
@@ -37,7 +38,7 @@ class AmazonWalmartAutomation:
             log_dir=settings.log_dir
         )
 
-        self.playwright = None
+        self._camoufox = None
         self.context: Optional[BrowserContext] = None
         self.amazon_auth: Optional[AmazonAuthenticator] = None
         self.walmart_auth: Optional[WalmartAuthenticator] = None
@@ -689,91 +690,37 @@ class AmazonWalmartAutomation:
         self.cleanup()
 
     def _init_browser(self) -> None:
-        """Initialize Playwright with persistent browser context.
+        """Initialize Camoufox with persistent browser context.
 
-        Uses launch_persistent_context with real Chrome (not Chromium) and a
-        persistent profile directory. This accumulates cookies, localStorage,
-        and browsing history across sessions, making the browser look like a
-        real user to bot detection (PerimeterX/HUMAN).
+        Uses Camoufox (anti-detect Firefox) with a persistent profile directory.
+        Camoufox handles fingerprint spoofing at the C++ level (WebGL, canvas,
+        navigator properties, etc.) and uses the Juggler protocol instead of CDP,
+        making it invisible to PerimeterX/HUMAN bot detection.
 
-        Always runs non-headless. On the LXC, xvfb provides a virtual display.
-        On Windows, the browser window is positioned off-screen.
+        On Linux, uses Camoufox's built-in virtual display (no xvfb needed).
+        On Windows, runs headed for debugging.
         """
         logger.info("Initializing browser with persistent profile...")
         logger.info(f"Profile directory: {self.profile_dir}")
 
-        self.playwright = sync_playwright().start()
+        # Determine headless mode: virtual display on Linux, headed on Windows
+        headless_mode = "virtual" if sys.platform != "win32" else False
 
-        # Build browser args
-        browser_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage",
-            "--no-sandbox",
-            "--disable-web-security",
-            "--disable-features=IsolateOrigins,site-per-process",
-            "--window-size=1920,1080",
-        ]
-
-        # On Linux (LXC with xvfb), hide window off-screen
-        # On Windows, keep it visible for debugging
-        if sys.platform != "win32":
-            browser_args.append("--window-position=-2000,-2000")
-
-        # Use persistent context - cookies/sessions persist in the Chrome profile
-        self.context = self.playwright.chromium.launch_persistent_context(
+        # Create Camoufox instance (manages its own playwright internally)
+        self._camoufox = Camoufox(
+            persistent_context=True,
             user_data_dir=str(self.profile_dir),
-            headless=False,  # Always non-headless (use xvfb on LXC)
-            channel="chrome",  # Real Chrome, not Chromium (harder to fingerprint)
-            slow_mo=50,  # Slight delay between actions (more human-like)
-            viewport={"width": 1920, "height": 1080},
+            headless=headless_mode,
+            humanize=True,  # C++ level human-like mouse movements
+            os="windows",  # Spoof as Windows for higher trust score
             locale="en-US",
-            args=browser_args,
+            window=(1920, 1080),
+            main_world_eval=True,  # Allow DOM-modifying evaluate() with mw: prefix
         )
+        # Enter the context manager to get BrowserContext
+        self.context = self._camoufox.__enter__()
 
-        # Anti-fingerprint init script for all pages in this context
-        self.context.add_init_script("""
-            // Hide webdriver flag
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-
-            // Spoof WebGL renderer to match host GPU (Intel Iris 540)
-            const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
-            WebGLRenderingContext.prototype.getParameter = function(param) {
-                if (param === 37445) return 'Intel Inc.';  // UNMASKED_VENDOR_WEBGL
-                if (param === 37446) return 'Intel(R) Iris(TM) Graphics 540';  // UNMASKED_RENDERER_WEBGL
-                return originalGetParameter.call(this, param);
-            };
-            const originalGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
-            WebGL2RenderingContext.prototype.getParameter = function(param) {
-                if (param === 37445) return 'Intel Inc.';
-                if (param === 37446) return 'Intel(R) Iris(TM) Graphics 540';
-                return originalGetParameter2.call(this, param);
-            };
-
-            // Spoof plugins to look like a real browser
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => {
-                    const plugins = [
-                        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-                        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
-                    ];
-                    plugins.length = 3;
-                    return plugins;
-                }
-            });
-
-            // Fix outerHeight/outerWidth to include window chrome (xvfb has none)
-            if (window.outerHeight === window.innerHeight) {
-                Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 85 });
-            }
-            if (window.outerWidth === window.innerWidth) {
-                Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth + 15 });
-            }
-        """)
-
-        logger.success("Browser launched with persistent profile (non-headless)")
+        logger.success("Browser launched with persistent profile (Camoufox)")
 
     def _restart_browser(self) -> None:
         """Restart browser to clear accumulated memory and renderer processes.
@@ -801,13 +748,18 @@ class AmazonWalmartAutomation:
                 self.walmart_auth.close()
                 self.walmart_auth = None
 
-            # Close persistent context and playwright
-            if self.context:
-                self.context.close()
+            # Close Camoufox (handles playwright cleanup internally)
+            if hasattr(self, '_camoufox') and self._camoufox:
+                try:
+                    self._camoufox.__exit__(None, None, None)
+                except Exception:
+                    try:
+                        if self.context:
+                            self.context.close()
+                    except Exception:
+                        pass
+                self._camoufox = None
                 self.context = None
-            if self.playwright:
-                self.playwright.stop()
-                self.playwright = None
 
             # Reset page references
             self.amazon_page = None
@@ -947,10 +899,15 @@ class AmazonWalmartAutomation:
                 self.amazon_auth.close()
             if self.walmart_auth:
                 self.walmart_auth.close()
-            if self.context:
-                self.context.close()
-            if self.playwright:
-                self.playwright.stop()
+            if hasattr(self, '_camoufox') and self._camoufox:
+                try:
+                    self._camoufox.__exit__(None, None, None)
+                except Exception:
+                    try:
+                        if self.context:
+                            self.context.close()
+                    except Exception:
+                        pass
 
             # Reset page references
             self.amazon_page = None

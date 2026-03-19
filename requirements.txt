@@ -4,6 +4,7 @@ pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
 # Browser automation
+camoufox[geoip]>=0.4.11
 playwright>=1.40.0
 
 # OTP/2FA

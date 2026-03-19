@@ -19,7 +19,6 @@ This tool automatically:
 ### Prerequisites
 
 - Python 3.9 or higher
-- Google Chrome installed (recommended) or Chromium
 - Amazon account with Alexa shopping list
 - Walmart account
 - For LXC: Proxmox host access for container configuration
@@ -41,7 +40,7 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 3. Install dependencies:
 ```bash
 pip install -r requirements.txt
-playwright install chromium  # Fallback if Chrome not installed
+python -m camoufox fetch  # Downloads patched Firefox binary (~300MB)
 ```
 
 4. Configure credentials:
@@ -55,7 +54,7 @@ cp credentials/credentials.py.example credentials/credentials.py
 Before running the automation, you need to establish a Walmart session in the persistent browser profile:
 
 ```bash
-# Opens Chrome so you can log into Walmart manually
+# Opens browser so you can log into Walmart manually
 python manual_login.py
 ```
 
@@ -64,8 +63,7 @@ or in the LXC...
 ```bash
 systemctl stop amazon-walmart-automation
 cd /home/VS-Alexa-Walmart
-xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
-  .venv/bin/python src/main.py --once
+.venv/bin/python src/main.py --once
 # Enter 2FA code when prompted
 systemctl start amazon-walmart-automation
 ```
@@ -84,7 +82,7 @@ python src/main.py --once
 python src/main.py
 ```
 
-The browser always runs in non-headless mode (visible on Windows, virtual display via xvfb on Linux). This is required to bypass Walmart's PerimeterX bot detection.
+Uses Camoufox (anti-detect Firefox) with a virtual display on Linux and visible browser on Windows. This bypasses Walmart's PerimeterX bot detection via C++ level fingerprint spoofing.
 
 The continuous monitoring mode will:
 - Check for new items every 5 seconds
@@ -94,7 +92,7 @@ The continuous monitoring mode will:
 
 ## Running in Proxmox LXC Container
 
-If you're running this in a Proxmox LXC container, you need to configure the container to allow Chrome/Chromium to access the network.
+If you're running this in a Proxmox LXC container, you need to configure the container to allow the browser to access the network.
 
 ### Required LXC Configuration
 
@@ -128,26 +126,18 @@ pct set <CTID> -features nesting=1
 pct restart <CTID>
 ```
 
-### Install Google Chrome (Recommended)
-
-Chrome works better than Chromium for avoiding bot detection:
+### Install Dependencies
 
 ```bash
 # Inside the LXC container
-cd /tmp
-wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-sudo apt install -y ./google-chrome-stable_current_amd64.deb
-sudo apt --fix-broken install  # If needed
-rm google-chrome-stable_current_amd64.deb
+sudo apt install -y xvfb libgtk-3-0 libx11-xcb1 libasound2
+
+# Install Camoufox browser binary
+cd /home/VS-Alexa-Walmart
+.venv/bin/python -m camoufox fetch
 ```
 
-### Install xvfb (Required)
-
-The automation runs Chrome in non-headless mode with a virtual display to bypass bot detection:
-
-```bash
-sudo apt install -y xvfb
-```
+Camoufox bundles its own patched Firefox and manages its own virtual display (`headless="virtual"`), so no `xvfb-run` wrapper is needed in the systemd service. However, `xvfb` must be installed as a system dependency.
 
 ### Systemd Service Setup
 
@@ -156,7 +146,7 @@ For continuous operation, set up a systemd service:
 ⚠️ **Important**: The systemd service is configured to:
 - Run as **root user** (prevents permission issues with git pull)
 - Expect project location at `/home/VS-Alexa-Walmart`
-- Use `xvfb-run` for virtual display (non-headless Chrome for bot detection bypass)
+- Camoufox manages its own virtual display (no xvfb-run wrapper needed)
 - Auto git pull on every service restart to stay updated
 
 ```bash
@@ -174,8 +164,7 @@ chmod +x deployment/setup-systemd.sh
 ./deployment/setup-systemd.sh
 
 # First-time: run once interactively to handle Walmart 2FA
-xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
-  .venv/bin/python src/main.py --once
+.venv/bin/python src/main.py --once
 
 # Start the service
 sudo systemctl start amazon-walmart-automation
@@ -193,12 +182,11 @@ See [deployment/SYSTEMD.md](deployment/SYSTEMD.md) for detailed service manageme
 - Ensure `features: nesting=1` is enabled
 - Restart the container after making changes
 
-**Test Chrome network access:**
+**Test network access:**
 ```bash
-google-chrome --headless --disable-gpu --dump-dom https://www.google.com
+curl -s https://www.walmart.com -o /dev/null -w "%{http_code}"
+# Should return 200 or 301
 ```
-
-If this works, the automation will work too.
 
 ## How It Works
 
@@ -207,7 +195,7 @@ The automation is organized into 4 modules:
 ### Module 0: Authentication
 - Authenticates with Amazon using OTP/TOTP
 - Authenticates with Walmart using email 2FA (only on first login from new browser)
-- Persists sessions via persistent Chrome browser profile (cookies, localStorage, history)
+- Persists sessions via persistent browser profile (cookies, localStorage, history)
 
 ### Module 1: Amazon Scraping
 - Navigates to Amazon Alexa shopping list
@@ -257,11 +245,13 @@ The automation is organized into 4 modules:
 - Example: "Attention. I could not add milk to the Walmart cart"
 - Requires Alexa Media Player integration in Home Assistant
 
-### Persistent Browser Profile
-- Uses Chrome persistent profile (`credentials/.playwright_profile/`) to store cookies, localStorage, and session data
-- Bypasses Walmart's PerimeterX bot detection by appearing as a real returning browser
+### Anti-Detect Browser (Camoufox)
+- Uses Camoufox (patched Firefox) with C++ level fingerprint spoofing
+- Bypasses Walmart's PerimeterX bot detection (PRESS & HOLD challenge)
+- Persistent browser profile (`credentials/.playwright_profile/`) stores cookies and session data
 - Keeps browser open between scheduled runs, reducing authentication overhead
-- Non-headless Chrome with xvfb virtual display on Linux for bot detection bypass
+- Built-in virtual display on Linux (no xvfb-run wrapper needed)
+- Humanized mouse movements for natural interaction
 
 ### Error Handling
 - Screenshots saved on errors
@@ -294,7 +284,7 @@ VS-Alexa-Walmart/
 │   └── SYSTEMD.md
 ├── manual_login.py         # Helper to manually log into Walmart
 ├── credentials/             # Your credentials (gitignored)
-│   └── .playwright_profile/ # Persistent Chrome profile (gitignored, auto-created)
+│   └── .playwright_profile/ # Persistent Firefox profile (gitignored, auto-created)
 ├── logs/                    # Log files & screenshots (auto-generated)
 ├── requirements.txt
 ├── README.md
@@ -375,15 +365,9 @@ The systemd service has no stdin, so `input()` for 2FA codes fails. This only ha
 # Stop service and run interactively
 sudo systemctl stop amazon-walmart-automation
 cd /home/VS-Alexa-Walmart
-xvfb-run --auto-servernum --server-args='-screen 0 1920x1080x24' \
-  .venv/bin/python src/main.py --once
+.venv/bin/python src/main.py --once
 # Enter 2FA code when prompted, then restart service
 sudo systemctl start amazon-walmart-automation
-```
-
-Alternatively, copy a working profile from your Windows machine:
-```bash
-scp -r credentials/.playwright_profile root@<LXC-IP>:/home/VS-Alexa-Walmart/credentials/.playwright_profile
 ```
 
 **Amazon authentication fails - Button click not working:**
