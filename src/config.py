@@ -93,7 +93,7 @@ class Settings(BaseSettings):
         description="Browser timeout in milliseconds"
     )
     browser_restart_hours: int = Field(
-        default=6,
+        default=72,
         description="Hours between browser restarts (memory leak prevention)"
     )
     gc_interval_minutes: int = Field(
